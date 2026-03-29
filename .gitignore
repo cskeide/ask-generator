@@ -1,0 +1,16 @@
+# Session folders
+sessions/*/
+
+# Output PDFs
+*.pdf
+
+# Image files
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.avif
+*.gif
+*.bmp
+*.tiff
+*.tif
