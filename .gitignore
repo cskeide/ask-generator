@@ -14,3 +14,9 @@ sessions/*/
 *.bmp
 *.tiff
 *.tif
+
+# PyInstaller build artifacts
+dist/
+build/
+__pycache__/
+*.pyc

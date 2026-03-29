@@ -16,20 +16,37 @@ Output is written to `output/<session-name>.pdf`. The `output/` directory is cre
 ## Dependencies
 
 ```bash
-sudo pacman -S python-pillow python-reportlab   # Arch Linux
-# or: pip install Pillow reportlab
+sudo pacman -S python-pillow python-reportlab pyside6   # Arch Linux
+# or: pip install -r requirements.txt
 ```
+
+`requirements.txt`: `PySide6>=6.6`, `Pillow>=10.0`, `reportlab>=4.0`
 
 ## Architecture
 
-Everything lives in `make_cards.py`. The flow is:
+The project has two entry points:
+
+- **`app.py`** — PySide6 desktop GUI; imports `make_cards` as a library and calls `make_cards.make_cards()` from a background `QThread`. Handles session management, image drag-and-drop, live page preview (rendered with Pillow), and PDF generation.
+- **`make_cards.py`** — standalone CLI / importable library; resolves paths, discovers images, computes grid geometry, drives the ReportLab canvas.
+- **`app.spec`** — PyInstaller spec that bundles `app.py` into a single-file executable (`dist/ask-card-generator`). Build with `pyinstaller app.spec`.
+
+`make_cards.py` internal flow:
 
 1. `make_cards()` — entry point; resolves paths, discovers images, computes grid geometry, drives the ReportLab canvas
 2. `_draw_card()` — draws one card: border → label → image (via Pillow → BytesIO → ReportLab)
 3. `_register_label_font()` — finds a TTF font on disk (Liberation Sans Bold preferred); falls back to Helvetica-Bold
 4. `_fit_label()` — shrinks font size until the label text fits within the card width
 
-All layout dimensions are computed from a few constants at the top of the file — edit those to change spacing without touching logic.
+All layout dimensions are computed from a few constants at the top of `make_cards.py` — edit those to change spacing without touching logic.
+
+`app.py` preview constants (separate from ReportLab layout):
+
+| Constant | Default | Effect |
+|---|---|---|
+| `_PREV_CARD` | `150 px` | Card size in preview |
+| `_PREV_COLS` | `3` | Columns in preview |
+| `_PREV_GAP` | `6 px` | Gap between cards in preview |
+| `_PREV_MARGIN` | `12 px` | Page margin in preview |
 
 ## Key conventions
 

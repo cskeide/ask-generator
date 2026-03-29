@@ -17,7 +17,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 COLS           = 3
 PAGE_MARGIN    = 10 * mm   # page edge → first card
 CARD_GAP       = 5  * mm   # gap between cards
-BORDER_WIDTH   = 1.0        # points
+BORDER_WIDTH   = 5              # points
 LABEL_FONT_PT  = 12         # points
 LABEL_PAD_V    = 2.5 * mm   # vertical padding above/below label text
 IMAGE_PAD      = 2.5 * mm   # equal padding left, right, and bottom of image
@@ -136,6 +136,8 @@ def make_cards(session_path_str: str) -> None:
     image_area_h  = card_size - label_area_h
     rows_per_page = int((page_h - 2 * PAGE_MARGIN + CARD_GAP) // (card_size + CARD_GAP))
     cards_per_page = COLS * rows_per_page
+    if cards_per_page <= 0:
+        sys.exit("Error: layout constants produce 0 cards per page — reduce PAGE_MARGIN, CARD_GAP, or COLS.")
 
     c = canvas.Canvas(str(output_path), pagesize=A4)
 

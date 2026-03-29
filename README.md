@@ -4,7 +4,30 @@ Generates print-ready A4 PDFs of picture cards for AAC/ASK (alternativ og supple
 
 Each card shows the image with the filename as the label — `stor_bror.jpg` becomes a card labelled **stor bror**.
 
-## Usage
+## GUI
+
+Run `app.py` for a desktop interface:
+
+```bash
+python app.py
+```
+
+The GUI provides:
+- **Sessions panel** — list existing sessions or create a new one
+- **Images panel** — drag-and-drop images into a session, add via file dialog, or right-click to remove
+- **Page preview** — live A4-proportioned preview with page navigation
+- **Generate PDF** button — runs `make_cards` in a background thread and shows an **Open PDF** button when done
+
+### Standalone executable
+
+Build a single-file executable with PyInstaller:
+
+```bash
+pyinstaller app.spec
+# output: dist/ask-card-generator
+```
+
+## CLI
 
 ```bash
 ./make_cards.sh sessions/2026-03-familie
@@ -21,7 +44,11 @@ Run without arguments to see help:
 ## Setup
 
 ```bash
-sudo pacman -S python-pillow python-reportlab
+# Arch Linux
+sudo pacman -S python-pillow python-reportlab pyside6
+
+# or via pip
+pip install -r requirements.txt
 ```
 
 ## Session folders

@@ -1,0 +1,92 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: ask-card-generator
+          - os: windows-latest
+            artifact: ask-card-generator.exe
+          - os: macos-latest
+            artifact: ask-card-generator
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      # PySide6 on Linux requires xcb platform plugin dependencies
+      - name: Install Qt platform dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 \
+            libxkbcommon-x11-0 libglib2.0-0 libdbus-1-3
+
+      - name: Build with PyInstaller
+        run: pyinstaller app.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ask-card-generator-${{ runner.os }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ask-card-generator-Linux
+          path: dist/linux
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ask-card-generator-Windows
+          path: dist/windows
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ask-card-generator-macOS
+          path: dist/macos
+
+      - name: Rename macOS artifact
+        run: mv dist/macos/ask-card-generator dist/macos/ask-card-generator-macos
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/linux/ask-card-generator
+            dist/windows/ask-card-generator.exe
+            dist/macos/ask-card-generator-macos
