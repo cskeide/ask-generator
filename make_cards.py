@@ -13,6 +13,16 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+
+def _to_rgb(img: Image.Image) -> Image.Image:
+    """Convert any Pillow image to RGB, handling palette+transparency correctly."""
+    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+        img = img.convert("RGBA")
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        bg.paste(img, mask=img.split()[3])
+        return bg
+    return img.convert("RGB")
+
 # ── Layout constants ───────────────────────────────────────────────────────────
 COLS           = 3
 PAGE_MARGIN    = 10 * mm   # page edge → first card
@@ -86,7 +96,7 @@ def _draw_card(
 
     # ── Image (equal IMAGE_PAD on left, right, and bottom) ────────────────────
     try:
-        pil_img        = Image.open(img_path).convert("RGB")
+        pil_img        = _to_rgb(Image.open(img_path))
         orig_w, orig_h = pil_img.size
         avail_w = card_size - 2 * IMAGE_PAD
         avail_h = image_area_h - IMAGE_PAD        # bottom pad; top is label area
