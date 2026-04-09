@@ -1,5 +1,7 @@
 # Session folders
 sessions/*/
+lotto-sessions/*/
+tegnprotokoll-sessions/*/
 
 # Output PDFs
 *.pdf
