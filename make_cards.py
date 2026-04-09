@@ -144,6 +144,8 @@ def make_cards(session_path_str: str) -> None:
     card_size     = (page_w - 2 * PAGE_MARGIN - (COLS - 1) * CARD_GAP) / COLS
     label_area_h  = LABEL_FONT_PT + 2 * LABEL_PAD_V
     image_area_h  = card_size - label_area_h
+    if card_size <= 0 or image_area_h <= 0:
+        sys.exit("Error: layout constants produce non-positive card dimensions — reduce PAGE_MARGIN, CARD_GAP, or COLS.")
     rows_per_page = int((page_h - 2 * PAGE_MARGIN + CARD_GAP) // (card_size + CARD_GAP))
     cards_per_page = COLS * rows_per_page
     if cards_per_page <= 0:

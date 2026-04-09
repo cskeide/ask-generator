@@ -12,7 +12,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 
 import make_cards
 from PIL import Image, ImageDraw, ImageFont
@@ -543,7 +543,7 @@ class LottoDownloadWorker(QThread):
         try:
             import arasaac
             data = arasaac.fetch_image(self.pic_id, resolution=500)
-            stem = self.label.replace(" ", "_").replace("/", "_")
+            stem = self.label.replace(" ", "_").replace("/", "_").replace("\\", "_").replace("..", "__")
             dest = self.session_path / f"{stem}.png"
             if dest.exists():
                 dest = self.session_path / f"{stem}_{self.pic_id}.png"
@@ -610,7 +610,7 @@ class TegnprotokollDownloadWorker(QThread):
             word     = self.record["word"]
             foto     = self.record.get("foto", "")
             la_hend  = self.record.get("la_hend", "")
-            stem     = word.replace(" ", "_").replace("/", "_")
+            stem     = word.replace(" ", "_").replace("/", "_").replace("\\", "_").replace("..", "__")
 
             data: Optional[bytes] = None
             ext  = ".jpg"
@@ -748,8 +748,8 @@ class LottoTab(QWidget):
         self._search_worker:          Optional[LottoSearchWorker]  = None
         self._board_worker:           Optional[LottoBoardWorker]   = None
         self._preview_worker:         Optional[LottoPreviewWorker] = None
-        self._stale_preview_workers:  List[LottoPreviewWorker]     = []
-        self._download_workers:       List[LottoDownloadWorker]    = []
+        self._stale_preview_workers:  Set[LottoPreviewWorker]     = set()
+        self._download_workers:       Set[LottoDownloadWorker]    = set()
         self._preview_images: List[Path] = []
         self._preview_page:   int = 0
         self._preview_total_pages: int = 1
@@ -1080,8 +1080,8 @@ class LottoTab(QWidget):
                 pass
             # Keep the old thread alive in the stale list until it finishes
             old = self._preview_worker
-            self._stale_preview_workers.append(old)
-            old.finished.connect(lambda w=old: self._stale_preview_workers.remove(w))
+            self._stale_preview_workers.add(old)
+            old.finished.connect(lambda w=old: self._stale_preview_workers.discard(w))
         self.lotto_preview_label.setText("Rendering…")
         worker = LottoPreviewWorker(self._preview_images, self._preview_page)
         worker.ready.connect(self._on_preview_ready)
@@ -1184,9 +1184,9 @@ class LottoTab(QWidget):
         worker = LottoDownloadWorker(pic_id, label, self.current_lotto_session)
         worker.done.connect(self._on_download_done)
         worker.error.connect(self._on_download_error)
-        worker.finished.connect(lambda w=worker: self._download_workers.remove(w))
+        worker.finished.connect(lambda w=worker: self._download_workers.discard(w))
         worker.finished.connect(worker.deleteLater)
-        self._download_workers.append(worker)
+        self._download_workers.add(worker)
         worker.start()
 
     def _on_download_done(self, _img_path: str) -> None:
@@ -1258,10 +1258,10 @@ class TegnprotokollTab(QWidget):
         self._descriptions:   dict                        = {}
         self._session_items:  List[Path]                  = []
         self._search_worker:  Optional[TegnprotokollSearchWorker]  = None
-        self._download_workers: List[TegnprotokollDownloadWorker]  = []
+        self._download_workers: Set[TegnprotokollDownloadWorker]  = set()
         self._pdf_worker:     Optional[TegnprotokollPdfWorker]     = None
         self._preview_worker: Optional[TegnprotokollPreviewWorker] = None
-        self._stale_preview_workers: List[TegnprotokollPreviewWorker] = []
+        self._stale_preview_workers: Set[TegnprotokollPreviewWorker] = set()
         self._preview_page:        int = 0
         self._preview_total_pages: int = 1
         self._last_pdf: Optional[str] = None
@@ -1629,9 +1629,9 @@ class TegnprotokollTab(QWidget):
             except RuntimeError:
                 pass
             old = self._preview_worker
-            self._stale_preview_workers.append(old)
+            self._stale_preview_workers.add(old)
             old.finished.connect(
-                lambda w=old: self._stale_preview_workers.remove(w)
+                lambda w=old: self._stale_preview_workers.discard(w)
             )
         self.tegn_preview_label.setText("Genererer forh\u00e5ndsvisning\u2026")
         worker = TegnprotokollPreviewWorker(
@@ -1739,10 +1739,10 @@ class TegnprotokollTab(QWidget):
         worker.done.connect(self._on_download_done)
         worker.error.connect(self._on_download_error)
         worker.finished.connect(
-            lambda w=worker: self._download_workers.remove(w)
+            lambda w=worker: self._download_workers.discard(w)
         )
         worker.finished.connect(worker.deleteLater)
-        self._download_workers.append(worker)
+        self._download_workers.add(worker)
         worker.start()
 
     def _on_download_done(self, _img_path: str) -> None:
@@ -1805,7 +1805,7 @@ class MainWindow(QMainWindow):
 
         self.current_session: Optional[Path] = None
         self._preview_worker: Optional[PreviewWorker] = None
-        self._stale_preview_workers: List[PreviewWorker] = []
+        self._stale_preview_workers: Set[PreviewWorker] = set()
         self._generate_worker: Optional[GenerateWorker] = None
         self._last_pdf: Optional[str] = None
         self._preview_images: List[Path] = []
@@ -2070,8 +2070,8 @@ class MainWindow(QMainWindow):
                 pass
             # Keep the old thread alive in the stale list until it finishes
             old = self._preview_worker
-            self._stale_preview_workers.append(old)
-            old.finished.connect(lambda w=old: self._stale_preview_workers.remove(w))
+            self._stale_preview_workers.add(old)
+            old.finished.connect(lambda w=old: self._stale_preview_workers.discard(w))
         self.preview_label.setText("Rendering…")
         worker = PreviewWorker(self._preview_images, self._preview_page)
         worker.ready.connect(self._on_preview_ready)
