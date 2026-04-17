@@ -1,7 +1,6 @@
 # pip install Pillow reportlab
 
 import io
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -11,56 +10,32 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 
+from pdf_utils import IMAGE_EXTS, to_rgb, register_nordic_bold_font, fit_text
 
-def _to_rgb(img: Image.Image) -> Image.Image:
-    """Convert any Pillow image to RGB, handling palette+transparency correctly."""
-    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-        img = img.convert("RGBA")
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[3])
-        return bg
-    return img.convert("RGB")
+# Alias kept for any external callers
+_to_rgb = to_rgb
 
 # ── Layout constants ───────────────────────────────────────────────────────────
-LOTTO_COLS    = 4
-PAGE_MARGIN   = 8  * mm   # page edge → first card
-CARD_GAP      = 4  * mm   # gap between cards
-BORDER_WIDTH  = 2.5       # points
-LABEL_FONT_PT = 10        # points
-LABEL_PAD_V   = 2  * mm   # vertical padding above label text baseline
-IMAGE_PAD     = 2  * mm   # padding around image on all four sides within image area
+LOTTO_COLS = 4
+PAGE_MARGIN = 8 * mm  # page edge → first card
+CARD_GAP = 4 * mm  # gap between cards
+BORDER_WIDTH = 2.5  # points
+LABEL_FONT_PT = 10  # points
+LABEL_PAD_V = 2 * mm  # vertical padding above label text baseline
+IMAGE_PAD = 2 * mm  # padding around image on all four sides within image area
 
 
 # ── Font setup ─────────────────────────────────────────────────────────────────
 def _register_label_font() -> str:
     """Register a TTF with Nordic character support and return its name."""
-    candidates = [
-        "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/Library/Fonts/Arial Bold.ttf",
-        "C:/Windows/Fonts/arialbd.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            pdfmetrics.registerFont(TTFont("_LottoFont", path))
-            return "_LottoFont"
-    return "Helvetica-Bold"
+    return register_nordic_bold_font("_LottoFont")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def _fit_label(c: canvas.Canvas, font: str, text: str, max_width: float) -> float:
     """Return the largest font size ≤ LABEL_FONT_PT at which *text* fits *max_width*."""
-    size = LABEL_FONT_PT
-    while size > 4:
-        if c.stringWidth(text, font, size) <= max_width:
-            return size
-        size -= 0.5
-    return size
+    return fit_text(c, font, text, max_width, LABEL_FONT_PT)
 
 
 def _draw_lotto_card(
@@ -88,11 +63,11 @@ def _draw_lotto_card(
         c.setDash([4, 4])
     c.rect(card_x, card_y, card_size, card_size)
     if cutout_mode:
-        c.setDash([])   # reset to solid for everything else
+        c.setDash([])  # reset to solid for everything else
 
     # ── Label at bottom (card_y → card_y + label_area_h) ──────────────────────
     font_size = _fit_label(c, font, label, card_size - 4 * mm)
-    baseline  = card_y + LABEL_PAD_V
+    baseline = card_y + LABEL_PAD_V
     c.setFont(font, font_size)
     c.setFillColorRGB(0, 0, 0)
     c.drawCentredString(card_x + card_size / 2, baseline, label)
@@ -100,16 +75,16 @@ def _draw_lotto_card(
     # ── Image (above label area, IMAGE_PAD on all four sides) ─────────────────
     # Image area in ReportLab: bottom = card_y + label_area_h, height = image_area_h
     try:
-        pil_img        = _to_rgb(Image.open(img_path))
+        pil_img = to_rgb(Image.open(img_path))
         orig_w, orig_h = pil_img.size
-        avail_w = card_size    - 2 * IMAGE_PAD
+        avail_w = card_size - 2 * IMAGE_PAD
         avail_h = image_area_h - 2 * IMAGE_PAD
-        scale   = min(avail_w / orig_w, avail_h / orig_h)
-        draw_w  = orig_w * scale
-        draw_h  = orig_h * scale
+        scale = min(avail_w / orig_w, avail_h / orig_h)
+        draw_w = orig_w * scale
+        draw_h = orig_h * scale
 
         img_area_bottom = card_y + label_area_h
-        draw_x = card_x        + IMAGE_PAD + (avail_w - draw_w) / 2
+        draw_x = card_x + IMAGE_PAD + (avail_w - draw_w) / 2
         draw_y = img_area_bottom + IMAGE_PAD + (avail_h - draw_h) / 2
 
         buf = io.BytesIO()
@@ -136,10 +111,7 @@ def _make_pdf(
     if not session_path.is_dir():
         raise ValueError(f"'{session_path_str}' is not a directory.")
 
-    images = sorted(
-        p for p in session_path.iterdir()
-        if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".avif"}
-    )
+    images = sorted(p for p in session_path.iterdir() if p.suffix.lower() in IMAGE_EXTS)
     if not images:
         raise ValueError(f"No images found in '{session_path_str}'.")
 
@@ -148,20 +120,20 @@ def _make_pdf(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     session_name = session_path.name
-    suffix       = "_cutout" if cutout_mode else "_board"
-    output_path  = output_dir / f"{session_name}{suffix}.pdf"
+    suffix = "_cutout" if cutout_mode else "_board"
+    output_path = output_dir / f"{session_name}{suffix}.pdf"
 
     font = _register_label_font()
 
     page_w, page_h = A4
-    card_size      = (page_w - 2 * PAGE_MARGIN - (LOTTO_COLS - 1) * CARD_GAP) / LOTTO_COLS
-    label_area_h   = LABEL_FONT_PT + 2 * LABEL_PAD_V
-    image_area_h   = card_size - label_area_h
+    card_size = (page_w - 2 * PAGE_MARGIN - (LOTTO_COLS - 1) * CARD_GAP) / LOTTO_COLS
+    label_area_h = LABEL_FONT_PT + 2 * LABEL_PAD_V
+    image_area_h = card_size - label_area_h
     if card_size <= 0 or image_area_h <= 0:
         raise ValueError(
             "Layout produces non-positive card dimensions — reduce PAGE_MARGIN, CARD_GAP, or LOTTO_COLS."
         )
-    rows_per_page  = int((page_h - 2 * PAGE_MARGIN + CARD_GAP) // (card_size + CARD_GAP))
+    rows_per_page = int((page_h - 2 * PAGE_MARGIN + CARD_GAP) // (card_size + CARD_GAP))
     cards_per_page = LOTTO_COLS * rows_per_page
 
     if cards_per_page <= 0:
@@ -188,7 +160,7 @@ def _make_pdf(
 
     c.save()
     pages = (len(images) - 1) // cards_per_page + 1
-    mode  = "cut-out" if cutout_mode else "board"
+    mode = "cut-out" if cutout_mode else "board"
     print(
         f"✓  {len(images)} lotto cards ({mode}) across {pages} page(s)  →  {output_path}\n"
         f"   Grid: {LOTTO_COLS} × {rows_per_page} = {cards_per_page} cards/page"
@@ -220,7 +192,7 @@ if __name__ == "__main__":
             "Usage:   python make_lotto.py <session_folder>\n"
             "Example: python make_lotto.py lotto-sessions/2026-04-test"
         )
-    board  = make_board_pdf(sys.argv[1])
+    board = make_board_pdf(sys.argv[1])
     cutout = make_cutout_pdf(sys.argv[1])
     print(f"Board:  {board}")
     print(f"Cutout: {cutout}")

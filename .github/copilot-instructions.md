@@ -69,7 +69,7 @@ All layout dimensions are computed from a few constants at the top of `make_card
 | `COLS` | `3` | Cards per row |
 | `PAGE_MARGIN` | `10 mm` | Page edge to first card |
 | `CARD_GAP` | `5 mm` | Space between cards |
-| `BORDER_WIDTH` | `1.0 pt` | Card border thickness |
+| `BORDER_WIDTH` | `5 pt` | Card border thickness |
 | `LABEL_FONT_PT` | `12 pt` | Max label font size |
 | `LABEL_PAD_V` | `2.5 mm` | Vertical padding inside label area |
 | `IMAGE_PAD` | `2.5 mm` | Padding around image (left/right/bottom) |

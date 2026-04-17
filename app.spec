@@ -23,6 +23,7 @@ a = Analysis(
         "PIL.JpegImagePlugin",
         "PIL.PngImagePlugin",
         "PIL.WebPImagePlugin",
+        "PIL.AvifImagePlugin",
     ],
     hookspath=[],
     hooksconfig={},

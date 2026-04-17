@@ -16,16 +16,22 @@ from typing import List, Optional, Set
 
 import make_cards
 from PIL import Image, ImageDraw, ImageFont
+from pdf_utils import IMAGE_EXTS, to_rgb, safe_stem, open_file
 
 
 def _to_rgb(img: Image.Image) -> Image.Image:
     """Convert any Pillow image to RGB, handling palette+transparency correctly."""
-    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-        img = img.convert("RGBA")
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[3])
-        return bg
-    return img.convert("RGB")
+    return to_rgb(img)
+
+
+def _pillow_to_qpixmap(img: Image.Image) -> "QPixmap":
+    """Convert a Pillow RGB image to QPixmap without a PNG encode/decode round-trip."""
+    raw = img.tobytes("raw", "RGB")
+    qimg = QImage(
+        raw, img.width, img.height, img.width * 3, QImage.Format.Format_RGB888
+    )
+    return QPixmap.fromImage(qimg)
+
 
 from PySide6.QtCore import Qt, QSize, QThread, Signal
 from PySide6.QtGui import QIcon, QImage, QPixmap
@@ -58,31 +64,30 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = Path(__file__).resolve().parent
 
-SESSIONS_DIR                = BASE_DIR / "sessions"
-LOTTO_SESSIONS_DIR          = BASE_DIR / "lotto-sessions"
-TEGNPROTOKOLL_SESSIONS_DIR  = BASE_DIR / "tegnprotokoll-sessions"
-OUTPUT_DIR                  = BASE_DIR / "output"
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
+SESSIONS_DIR = BASE_DIR / "sessions"
+LOTTO_SESSIONS_DIR = BASE_DIR / "lotto-sessions"
+TEGNPROTOKOLL_SESSIONS_DIR = BASE_DIR / "tegnprotokoll-sessions"
+OUTPUT_DIR = BASE_DIR / "output"
 
 # ── Preview rendering ──────────────────────────────────────────────────────────
-_PREV_CARD = 150   # px per card in preview
+_PREV_CARD = 150  # px per card in preview
 _PREV_COLS = 3
 _PREV_GAP = 6
 _PREV_MARGIN = 12
 
 # Lotto preview constants (4-column, label-at-bottom)
-_LOTTO_PREV_CARD   = 120
-_LOTTO_PREV_COLS   = 4
-_LOTTO_PREV_GAP    = 5
+_LOTTO_PREV_CARD = 120
+_LOTTO_PREV_COLS = 4
+_LOTTO_PREV_GAP = 5
 _LOTTO_PREV_MARGIN = 12
 
 # Tegnprotokoll preview constants (A4 table, 3 columns)
-_TEGN_PREV_W      = 500
-_TEGN_PREV_H      = int(500 * 297 / 210)   # ≈707 px, A4 aspect
+_TEGN_PREV_W = 500
+_TEGN_PREV_H = int(500 * 297 / 210)  # ≈707 px, A4 aspect
 _TEGN_PREV_MARGIN = 20
-_TEGN_PREV_ROW_H  = 65    # px per data row
-_TEGN_PREV_HDR_H  = 20    # column-header row
-_TEGN_PREV_TITLE_H = 28   # page-title area
+_TEGN_PREV_ROW_H = 65  # px per data row
+_TEGN_PREV_HDR_H = 20  # column-header row
+_TEGN_PREV_TITLE_H = 28  # page-title area
 _TEGN_PREV_FOOTER_H = 16
 _TEGN_PREV_COL_FRACS = (0.27, 0.33, 0.40)  # word | image | description
 
@@ -140,12 +145,17 @@ def render_page_preview(images: List[Path], page_index: int = 0) -> QPixmap:
         cy = margin + row * (card + gap)
 
         # Card border
-        draw.rectangle([cx, cy, cx + card - 1, cy + card - 1],
-                       outline=(0, 0, 0), width=1)
+        draw.rectangle(
+            [cx, cy, cx + card - 1, cy + card - 1], outline=(0, 0, 0), width=1
+        )
 
         # Label background + text
-        draw.rectangle([cx, cy, cx + card - 1, cy + label_h],
-                       fill=(240, 240, 240), outline=(180, 180, 180), width=1)
+        draw.rectangle(
+            [cx, cy, cx + card - 1, cy + label_h],
+            fill=(240, 240, 240),
+            outline=(180, 180, 180),
+            width=1,
+        )
         label = img_path.stem.replace("_", " ")
         try:
             bbox = font.getbbox(label)
@@ -154,7 +164,9 @@ def render_page_preview(images: List[Path], page_index: int = 0) -> QPixmap:
             tw, th = font.getsize(label)  # type: ignore[attr-defined]
         draw.text(
             (cx + max(2, (card - tw) // 2), cy + max(1, (label_h - th) // 2)),
-            label, fill=(0, 0, 0), font=font,
+            label,
+            fill=(0, 0, 0),
+            font=font,
         )
 
         # Thumbnail image
@@ -163,22 +175,25 @@ def render_page_preview(images: List[Path], page_index: int = 0) -> QPixmap:
         try:
             thumb = _to_rgb(Image.open(img_path))
             thumb.thumbnail((iw, ih), Image.LANCZOS)
-            page.paste(thumb, (
-                cx + pad + (iw - thumb.width) // 2,
-                cy + label_h + (ih - thumb.height) // 2,
-            ))
+            page.paste(
+                thumb,
+                (
+                    cx + pad + (iw - thumb.width) // 2,
+                    cy + label_h + (ih - thumb.height) // 2,
+                ),
+            )
         except Exception:
             pass
 
-    buf = io.BytesIO()
-    page.save(buf, format="PNG")
-    buf.seek(0)
-    return QPixmap.fromImage(QImage.fromData(buf.read()))
+    return _pillow_to_qpixmap(page)
 
 
 def _lotto_cards_per_page() -> int:
     card, gap, margin, cols = (
-        _LOTTO_PREV_CARD, _LOTTO_PREV_GAP, _LOTTO_PREV_MARGIN, _LOTTO_PREV_COLS
+        _LOTTO_PREV_CARD,
+        _LOTTO_PREV_GAP,
+        _LOTTO_PREV_MARGIN,
+        _LOTTO_PREV_COLS,
     )
     page_w = cols * card + (cols - 1) * gap + 2 * margin
     page_h = int(page_w * (297 / 210))
@@ -206,33 +221,33 @@ def render_tegnprotokoll_preview(
     if not items:
         return QPixmap()
 
-    w, h       = _TEGN_PREV_W, _TEGN_PREV_H
-    margin     = _TEGN_PREV_MARGIN
-    row_h      = _TEGN_PREV_ROW_H
-    hdr_h      = _TEGN_PREV_HDR_H
-    title_h    = _TEGN_PREV_TITLE_H
-    footer_h   = _TEGN_PREV_FOOTER_H
+    w, h = _TEGN_PREV_W, _TEGN_PREV_H
+    margin = _TEGN_PREV_MARGIN
+    row_h = _TEGN_PREV_ROW_H
+    hdr_h = _TEGN_PREV_HDR_H
+    title_h = _TEGN_PREV_TITLE_H
+    footer_h = _TEGN_PREV_FOOTER_H
 
-    ipp        = _tegn_items_per_page()
-    start      = page_index * ipp
+    ipp = _tegn_items_per_page()
+    start = page_index * ipp
     page_items = items[start : start + ipp]
 
     usable_w = w - 2 * margin
-    raw_ws   = [int(f * usable_w) for f in _TEGN_PREV_COL_FRACS]
-    raw_ws[-1] = usable_w - sum(raw_ws[:-1])   # fix rounding
+    raw_ws = [int(f * usable_w) for f in _TEGN_PREV_COL_FRACS]
+    raw_ws[-1] = usable_w - sum(raw_ws[:-1])  # fix rounding
     w_word, w_img, w_desc = raw_ws
 
     fsize_title = max(10, title_h // 2)
-    fsize_hdr   = max(8,  hdr_h  // 2 - 1)
-    fsize_word  = max(10, row_h  // 4)
-    fsize_desc  = max(8,  row_h  // 6)
-    fsize_foot  = max(7,  footer_h // 2 - 1)
+    fsize_hdr = max(8, hdr_h // 2 - 1)
+    fsize_word = max(10, row_h // 4)
+    fsize_desc = max(8, row_h // 6)
+    fsize_foot = max(7, footer_h // 2 - 1)
 
-    font_title  = _preview_font(fsize_title)
-    font_hdr    = _preview_font(fsize_hdr)
-    font_word   = _preview_font(fsize_word)
-    font_desc   = _preview_font(fsize_desc)
-    font_foot   = _preview_font(fsize_foot)
+    font_title = _preview_font(fsize_title)
+    font_hdr = _preview_font(fsize_hdr)
+    font_word = _preview_font(fsize_word)
+    font_desc = _preview_font(fsize_desc)
+    font_foot = _preview_font(fsize_foot)
 
     page = Image.new("RGB", (w, h), (255, 255, 255))
     draw = ImageDraw.Draw(page)
@@ -241,28 +256,33 @@ def render_tegnprotokoll_preview(
     session_name = items[0].parent.name.replace("-", " ") if items else ""
     draw.text(
         (margin, margin + 4),
-        f"Tegnprotokoll \u2014 {session_name}",
-        fill=(0, 0, 0), font=font_title,
+        f"Sign Protocol \u2014 {session_name}",
+        fill=(0, 0, 0),
+        font=font_title,
     )
 
     # ── Column header ─────────────────────────────────────────────────────────
-    table_x   = margin
+    table_x = margin
     table_top = margin + title_h
     draw.rectangle(
         [table_x, table_top, table_x + usable_w - 1, table_top + hdr_h - 1],
-        fill=(215, 215, 215), outline=(160, 160, 160), width=1,
+        fill=(215, 215, 215),
+        outline=(160, 160, 160),
+        width=1,
     )
-    headers = ["Tegn", "Bilde", "Hvordan barnet bruker tegnet"]
+    headers = ["Sign", "Image", "How the child uses the sign"]
     hx = table_x
     for hdr, cw in zip(headers, raw_ws):
         try:
             bbox = font_hdr.getbbox(hdr)
-            tw   = bbox[2] - bbox[0]
+            tw = bbox[2] - bbox[0]
         except AttributeError:
             tw, _ = font_hdr.getsize(hdr)  # type: ignore[attr-defined]
         draw.text(
             (hx + max(2, (cw - tw) // 2), table_top + 3),
-            hdr, fill=(0, 0, 0), font=font_hdr,
+            hdr,
+            fill=(0, 0, 0),
+            font=font_hdr,
         )
         hx += cw
     x1 = table_x + w_word
@@ -276,7 +296,8 @@ def render_tegnprotokoll_preview(
         rb = row_y + row_h
         draw.rectangle(
             [table_x, row_y, table_x + usable_w - 1, rb - 1],
-            outline=(190, 190, 190), width=1,
+            outline=(190, 190, 190),
+            width=1,
         )
         x1 = table_x + w_word
         x2 = table_x + w_word + w_img
@@ -291,9 +312,10 @@ def render_tegnprotokoll_preview(
         except AttributeError:
             tw, th = font_word.getsize(label)  # type: ignore[attr-defined]
         draw.text(
-            (table_x + max(2, (w_word - tw) // 2),
-             row_y + max(2, (row_h - th) // 2)),
-            label, fill=(0, 0, 0), font=font_word,
+            (table_x + max(2, (w_word - tw) // 2), row_y + max(2, (row_h - th) // 2)),
+            label,
+            fill=(0, 0, 0),
+            font=font_word,
         )
 
         # Sign image
@@ -304,8 +326,7 @@ def render_tegnprotokoll_preview(
             thumb.thumbnail((avail_w, avail_h), Image.LANCZOS)
             page.paste(
                 thumb,
-                (x1 + (w_img - thumb.width) // 2,
-                 row_y + (row_h - thumb.height) // 2),
+                (x1 + (w_img - thumb.width) // 2, row_y + (row_h - thumb.height) // 2),
             )
         except Exception:
             pass
@@ -317,8 +338,8 @@ def render_tegnprotokoll_preview(
             # Truncate to fit single line
             display = desc
             try:
-                bbox  = font_desc.getbbox(display)
-                tw    = bbox[2] - bbox[0]
+                bbox = font_desc.getbbox(display)
+                tw = bbox[2] - bbox[0]
             except AttributeError:
                 tw, _ = font_desc.getsize(display)  # type: ignore[attr-defined]
             max_desc_w = w_desc - 8
@@ -326,12 +347,14 @@ def render_tegnprotokoll_preview(
                 display = display[:-4] + "\u2026"
                 try:
                     bbox = font_desc.getbbox(display)
-                    tw   = bbox[2] - bbox[0]
+                    tw = bbox[2] - bbox[0]
                 except AttributeError:
                     tw, _ = font_desc.getsize(display)  # type: ignore[attr-defined]
             draw.text(
                 (x2 + 4, row_y + max(2, (row_h - fsize_desc) // 2)),
-                display, fill=(40, 40, 40), font=font_desc,
+                display,
+                fill=(40, 40, 40),
+                font=font_desc,
             )
         else:
             # Ruled lines for handwriting
@@ -340,7 +363,8 @@ def render_tegnprotokoll_preview(
             while ly < rb - 4:
                 draw.line(
                     [x2 + 6, ly, table_x + usable_w - 6, ly],
-                    fill=(210, 210, 210), width=1,
+                    fill=(210, 210, 210),
+                    width=1,
                 )
                 ly += spacing
 
@@ -350,18 +374,17 @@ def render_tegnprotokoll_preview(
     footer_text = "Statped / tegnbanken.no \u2014 CC BY-NC-ND 4.0"
     try:
         bbox = font_foot.getbbox(footer_text)
-        fw   = bbox[2] - bbox[0]
+        fw = bbox[2] - bbox[0]
     except AttributeError:
         fw, _ = font_foot.getsize(footer_text)  # type: ignore[attr-defined]
     draw.text(
         (w // 2 - fw // 2, h - footer_h + 2),
-        footer_text, fill=(160, 160, 160), font=font_foot,
+        footer_text,
+        fill=(160, 160, 160),
+        font=font_foot,
     )
 
-    buf = io.BytesIO()
-    page.save(buf, format="PNG")
-    buf.seek(0)
-    return QPixmap.fromImage(QImage.fromData(buf.read()))
+    return _pillow_to_qpixmap(page)
 
 
 def render_lotto_preview(images: List[Path], page_index: int = 0) -> QPixmap:
@@ -370,19 +393,22 @@ def render_lotto_preview(images: List[Path], page_index: int = 0) -> QPixmap:
         return QPixmap()
 
     card, gap, margin, cols = (
-        _LOTTO_PREV_CARD, _LOTTO_PREV_GAP, _LOTTO_PREV_MARGIN, _LOTTO_PREV_COLS
+        _LOTTO_PREV_CARD,
+        _LOTTO_PREV_GAP,
+        _LOTTO_PREV_MARGIN,
+        _LOTTO_PREV_COLS,
     )
     page_w = cols * card + (cols - 1) * gap + 2 * margin
     page_h = int(page_w * (297 / 210))
 
-    rows_per_page  = max(1, (page_h - 2 * margin + gap) // (card + gap))
+    rows_per_page = max(1, (page_h - 2 * margin + gap) // (card + gap))
     cards_per_page = rows_per_page * cols
-    start      = page_index * cards_per_page
+    start = page_index * cards_per_page
     first_page = images[start : start + cards_per_page]
 
-    label_h   = max(16, card // 8)
+    label_h = max(16, card // 8)
     font_size = max(8, label_h - 6)
-    font      = _preview_font(font_size)
+    font = _preview_font(font_size)
 
     page = Image.new("RGB", (page_w, page_h), (255, 255, 255))
     draw = ImageDraw.Draw(page)
@@ -393,27 +419,33 @@ def render_lotto_preview(images: List[Path], page_index: int = 0) -> QPixmap:
         cy = margin + row * (card + gap)
 
         # Card border
-        draw.rectangle([cx, cy, cx + card - 1, cy + card - 1],
-                       outline=(0, 0, 0), width=1)
+        draw.rectangle(
+            [cx, cy, cx + card - 1, cy + card - 1], outline=(0, 0, 0), width=1
+        )
 
         # Thumbnail in the image area (above label)
-        pad        = 3
-        img_area_h = card - label_h - pad   # height from cy to start of label
-        iw, ih     = card - 2 * pad, img_area_h
+        pad = 3
+        img_area_h = card - label_h - pad  # height from cy to start of label
+        iw, ih = card - 2 * pad, img_area_h
         try:
             thumb = _to_rgb(Image.open(img_path))
             thumb.thumbnail((iw, ih), Image.LANCZOS)
-            page.paste(thumb, (
-                cx + pad + (iw - thumb.width) // 2,
-                cy + pad + (img_area_h - thumb.height) // 2,
-            ))
+            page.paste(
+                thumb,
+                (
+                    cx + pad + (iw - thumb.width) // 2,
+                    cy + pad + (img_area_h - thumb.height) // 2,
+                ),
+            )
         except Exception:
             pass
 
         # Label background + text at bottom of card
         draw.rectangle(
             [cx, cy + card - label_h, cx + card - 1, cy + card - 1],
-            fill=(240, 240, 240), outline=(180, 180, 180), width=1,
+            fill=(240, 240, 240),
+            outline=(180, 180, 180),
+            width=1,
         )
         label = img_path.stem.replace("_", " ")
         try:
@@ -426,18 +458,17 @@ def render_lotto_preview(images: List[Path], page_index: int = 0) -> QPixmap:
                 cx + max(2, (card - tw) // 2),
                 cy + card - label_h + max(1, (label_h - th) // 2),
             ),
-            label, fill=(0, 0, 0), font=font,
+            label,
+            fill=(0, 0, 0),
+            font=font,
         )
 
-    buf = io.BytesIO()
-    page.save(buf, format="PNG")
-    buf.seek(0)
-    return QPixmap.fromImage(QImage.fromData(buf.read()))
+    return _pillow_to_qpixmap(page)
 
 
 # ── Worker threads ─────────────────────────────────────────────────────────────
 class GenerateWorker(QThread):
-    done = Signal(str)   # path to generated PDF
+    done = Signal(str)  # path to generated PDF
     error = Signal(str)  # error message
 
     def __init__(self, session_path: Path, parent: Optional[QWidget] = None):
@@ -446,25 +477,11 @@ class GenerateWorker(QThread):
 
     def run(self) -> None:
         try:
-            make_cards.make_cards(str(self.session_path))
-
-            session_name = self.session_path.name
-            if getattr(sys, "frozen", False):
-                # In a PyInstaller onefile bundle make_cards.__file__ resolves
-                # inside sys._MEIPASS (temp dir).  Move the PDF to BASE_DIR.
-                meipass = Path(getattr(sys, "_MEIPASS", ""))
-                src = meipass / "output" / f"{session_name}.pdf"
-                dst = OUTPUT_DIR / f"{session_name}.pdf"
-                if src.exists() and src != dst:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, dst)
-                    src.unlink(missing_ok=True)
-                self.done.emit(str(dst))
-            else:
-                self.done.emit(str(OUTPUT_DIR / f"{session_name}.pdf"))
-
-        except SystemExit as exc:
-            self.error.emit(str(exc))
+            # Pass OUTPUT_DIR directly so make_cards always writes to the right
+            # place — including inside a PyInstaller onefile bundle where
+            # make_cards.__file__ resolves to sys._MEIPASS (a temp dir).
+            out_path = make_cards.make_cards(str(self.session_path), OUTPUT_DIR)
+            self.done.emit(str(out_path))
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -472,7 +489,9 @@ class GenerateWorker(QThread):
 class PreviewWorker(QThread):
     ready = Signal(QPixmap)
 
-    def __init__(self, images: List[Path], page_index: int = 0, parent: Optional[QWidget] = None):
+    def __init__(
+        self, images: List[Path], page_index: int = 0, parent: Optional[QWidget] = None
+    ):
         super().__init__(parent)
         self.images = images
         self.page_index = page_index
@@ -484,7 +503,9 @@ class PreviewWorker(QThread):
 class LottoPreviewWorker(QThread):
     ready = Signal(QPixmap)
 
-    def __init__(self, images: List[Path], page_index: int = 0, parent: Optional[QWidget] = None):
+    def __init__(
+        self, images: List[Path], page_index: int = 0, parent: Optional[QWidget] = None
+    ):
         super().__init__(parent)
         self.images = images
         self.page_index = page_index
@@ -495,8 +516,9 @@ class LottoPreviewWorker(QThread):
 
 class LottoSearchWorker(QThread):
     """Fetch ARASAAC search results + 300 px thumbnails for a query."""
-    results = Signal(list)   # list[dict] with thumb_bytes filled in
-    error   = Signal(str)
+
+    results = Signal(list)  # list[dict] with thumb_bytes filled in
+    error = Signal(str)
 
     def __init__(self, query: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -506,6 +528,7 @@ class LottoSearchWorker(QThread):
         try:
             import arasaac
             from concurrent.futures import ThreadPoolExecutor
+
             items = arasaac.search(self.query)
 
             def _fetch_thumb(r: dict) -> dict:
@@ -524,7 +547,8 @@ class LottoSearchWorker(QThread):
 
 class LottoDownloadWorker(QThread):
     """Download a single pictogram PNG and save it to the session directory."""
-    done  = Signal(str)   # path to saved file
+
+    done = Signal(str)  # path to saved file
     error = Signal(str)
 
     def __init__(
@@ -535,15 +559,16 @@ class LottoDownloadWorker(QThread):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
-        self.pic_id       = pic_id
-        self.label        = label
+        self.pic_id = pic_id
+        self.label = label
         self.session_path = session_path
 
     def run(self) -> None:
         try:
             import arasaac
+
             data = arasaac.fetch_image(self.pic_id, resolution=500)
-            stem = self.label.replace(" ", "_").replace("/", "_").replace("\\", "_").replace("..", "__")
+            stem = safe_stem(self.label)
             dest = self.session_path / f"{stem}.png"
             if dest.exists():
                 dest = self.session_path / f"{stem}_{self.pic_id}.png"
@@ -555,7 +580,8 @@ class LottoDownloadWorker(QThread):
 
 class LottoBoardWorker(QThread):
     """Generate both board and cut-out PDFs for a lotto session."""
-    done  = Signal(str, str)   # (board_path, cutout_path)
+
+    done = Signal(str, str)  # (board_path, cutout_path)
     error = Signal(str)
 
     def __init__(self, session_path: Path, parent: Optional[QWidget] = None):
@@ -565,7 +591,8 @@ class LottoBoardWorker(QThread):
     def run(self) -> None:
         try:
             import make_lotto
-            board  = make_lotto.make_board_pdf(str(self.session_path), OUTPUT_DIR)
+
+            board = make_lotto.make_board_pdf(str(self.session_path), OUTPUT_DIR)
             cutout = make_lotto.make_cutout_pdf(str(self.session_path), OUTPUT_DIR)
             self.done.emit(str(board), str(cutout))
         except Exception as exc:
@@ -574,8 +601,9 @@ class LottoBoardWorker(QThread):
 
 class TegnprotokollSearchWorker(QThread):
     """Search Tegnbanken records (client-side, cached XML)."""
+
     results = Signal(list)
-    error   = Signal(str)
+    error = Signal(str)
 
     def __init__(self, query: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -584,6 +612,7 @@ class TegnprotokollSearchWorker(QThread):
     def run(self) -> None:
         try:
             import tegnbanken
+
             self.results.emit(tegnbanken.search(self.query))
         except Exception as exc:
             self.error.emit(str(exc))
@@ -591,7 +620,8 @@ class TegnprotokollSearchWorker(QThread):
 
 class TegnprotokollDownloadWorker(QThread):
     """Download a sign image from Tegnbanken and save it to the session folder."""
-    done  = Signal(str)   # path to saved file
+
+    done = Signal(str)  # path to saved file
     error = Signal(str)
 
     def __init__(
@@ -601,32 +631,33 @@ class TegnprotokollDownloadWorker(QThread):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
-        self.record       = record
+        self.record = record
         self.session_path = session_path
 
     def run(self) -> None:
         try:
             import tegnbanken
-            word     = self.record["word"]
-            foto     = self.record.get("foto", "")
-            la_hend  = self.record.get("la_hend", "")
-            stem     = word.replace(" ", "_").replace("/", "_").replace("\\", "_").replace("..", "__")
+
+            word = self.record["word"]
+            foto = self.record.get("foto", "")
+            la_hend = self.record.get("la_hend", "")
+            stem = safe_stem(word)
 
             data: Optional[bytes] = None
-            ext  = ".jpg"
+            ext = ".jpg"
 
             # Prefer la_hend (strektegning / line drawing) over foto (colour photo)
             if la_hend:
                 try:
                     data = tegnbanken.fetch_image(la_hend, "la_hend")
-                    ext  = Path(la_hend).suffix or ".jpg"
+                    ext = Path(la_hend).suffix or ".jpg"
                 except Exception:
                     pass
 
             if data is None and foto:
                 try:
                     data = tegnbanken.fetch_image(foto, "foto")
-                    ext  = Path(foto).suffix or ".jpg"
+                    ext = Path(foto).suffix or ".jpg"
                 except Exception:
                     pass
 
@@ -638,7 +669,7 @@ class TegnprotokollDownloadWorker(QThread):
                 buf = io.BytesIO()
                 ph.save(buf, format="PNG")
                 data = buf.getvalue()
-                ext  = ".png"
+                ext = ".png"
 
             dest = self.session_path / f"{stem}{ext}"
             if dest.exists():
@@ -654,7 +685,8 @@ class TegnprotokollDownloadWorker(QThread):
 
 class TegnprotokollPdfWorker(QThread):
     """Generate a Tegnprotokoll PDF in a background thread."""
-    done  = Signal(str)
+
+    done = Signal(str)
     error = Signal(str)
 
     def __init__(self, session_path: Path, parent: Optional[QWidget] = None):
@@ -664,6 +696,7 @@ class TegnprotokollPdfWorker(QThread):
     def run(self) -> None:
         try:
             import make_tegnprotokoll
+
             out = make_tegnprotokoll.make_tegnprotokoll(
                 str(self.session_path), OUTPUT_DIR
             )
@@ -674,6 +707,7 @@ class TegnprotokollPdfWorker(QThread):
 
 class TegnprotokollPreviewWorker(QThread):
     """Render a Tegnprotokoll table preview page using Pillow."""
+
     ready = Signal(QPixmap)
 
     def __init__(
@@ -684,9 +718,9 @@ class TegnprotokollPreviewWorker(QThread):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
-        self.items        = items
+        self.items = items
         self.descriptions = descriptions
-        self.page_index   = page_index
+        self.page_index = page_index
 
     def run(self) -> None:
         self.ready.emit(
@@ -745,15 +779,15 @@ class LottoTab(QWidget):
         super().__init__(parent)
 
         self.current_lotto_session: Optional[Path] = None
-        self._search_worker:          Optional[LottoSearchWorker]  = None
-        self._board_worker:           Optional[LottoBoardWorker]   = None
-        self._preview_worker:         Optional[LottoPreviewWorker] = None
-        self._stale_preview_workers:  Set[LottoPreviewWorker]     = set()
-        self._download_workers:       Set[LottoDownloadWorker]    = set()
+        self._search_worker: Optional[LottoSearchWorker] = None
+        self._board_worker: Optional[LottoBoardWorker] = None
+        self._preview_worker: Optional[LottoPreviewWorker] = None
+        self._stale_preview_workers: Set[LottoPreviewWorker] = set()
+        self._download_workers: Set[LottoDownloadWorker] = set()
         self._preview_images: List[Path] = []
-        self._preview_page:   int = 0
+        self._preview_page: int = 0
         self._preview_total_pages: int = 1
-        self._last_board_pdf:  Optional[str] = None
+        self._last_board_pdf: Optional[str] = None
         self._last_cutout_pdf: Optional[str] = None
 
         LOTTO_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -845,8 +879,12 @@ class LottoTab(QWidget):
         self.lotto_image_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.lotto_image_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.lotto_image_list.setSpacing(6)
-        self.lotto_image_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.lotto_image_list.customContextMenuRequested.connect(self._card_context_menu)
+        self.lotto_image_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.lotto_image_list.customContextMenuRequested.connect(
+            self._card_context_menu
+        )
         layout.addWidget(self.lotto_image_list, stretch=1)
         return panel
 
@@ -922,7 +960,9 @@ class LottoTab(QWidget):
     def _refresh_sessions(self) -> None:
         current_name: Optional[str] = None
         if self.lotto_session_list.currentItem():
-            p: Path = self.lotto_session_list.currentItem().data(Qt.ItemDataRole.UserRole)
+            p: Path = self.lotto_session_list.currentItem().data(
+                Qt.ItemDataRole.UserRole
+            )
             current_name = p.name
 
         self.lotto_session_list.clear()
@@ -968,8 +1008,9 @@ class LottoTab(QWidget):
         name = name.strip().replace(" ", "-")
         new_path = LOTTO_SESSIONS_DIR / name
         if new_path.exists():
-            QMessageBox.warning(self, "Already exists",
-                                f"Session '{name}' already exists.")
+            QMessageBox.warning(
+                self, "Already exists", f"Session '{name}' already exists."
+            )
             return
         new_path.mkdir(parents=True)
         self._refresh_sessions()
@@ -987,7 +1028,8 @@ class LottoTab(QWidget):
             return
 
         images = sorted(
-            p for p in self.current_lotto_session.iterdir()
+            p
+            for p in self.current_lotto_session.iterdir()
             if p.suffix.lower() in IMAGE_EXTS
         )
         for img_path in images:
@@ -1031,17 +1073,22 @@ class LottoTab(QWidget):
                 new_stem = new_label.strip().replace(" ", "_")
                 new_path = img_path.with_stem(new_stem)
                 if new_path.exists():
-                    QMessageBox.warning(self, "Name taken",
-                                        f"'{new_path.name}' already exists.")
+                    QMessageBox.warning(
+                        self, "Name taken", f"'{new_path.name}' already exists."
+                    )
                 else:
                     img_path.rename(new_path)
                     self._load_session_images()
         elif action == remove_action:
-            if QMessageBox.question(
-                self, "Remove card",
-                f"Delete '{img_path.name}' from this session?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            ) == QMessageBox.StandardButton.Yes:
+            if (
+                QMessageBox.question(
+                    self,
+                    "Remove card",
+                    f"Delete '{img_path.name}' from this session?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                == QMessageBox.StandardButton.Yes
+            ):
                 img_path.unlink(missing_ok=True)
                 self._refresh_sessions()
                 self._load_session_images()
@@ -1055,8 +1102,9 @@ class LottoTab(QWidget):
         action = menu.exec(self.result_list.mapToGlobal(pos))
         if action == add_action:
             if self.current_lotto_session is None:
-                QMessageBox.warning(self, "No session",
-                                    "Please select or create a session first.")
+                QMessageBox.warning(
+                    self, "No session", "Please select or create a session first."
+                )
                 return
             r = item.data(Qt.ItemDataRole.UserRole)
             self._start_download(r["id"], r["label"])
@@ -1066,9 +1114,7 @@ class LottoTab(QWidget):
     def _schedule_preview(self, images: List[Path]) -> None:
         self._preview_images = images
         cpp = _lotto_cards_per_page()
-        self._preview_total_pages = max(
-            1, -(-len(images) // cpp) if images else 1
-        )
+        self._preview_total_pages = max(1, -(-len(images) // cpp) if images else 1)
         self._update_nav_buttons()
         self._update_preview()
 
@@ -1090,7 +1136,7 @@ class LottoTab(QWidget):
 
     def _update_nav_buttons(self) -> None:
         total = self._preview_total_pages
-        page  = self._preview_page
+        page = self._preview_page
         self.lotto_prev_btn.setEnabled(page > 0)
         self.lotto_next_btn.setEnabled(page < total - 1)
         self.lotto_page_label.setText(
@@ -1169,7 +1215,8 @@ class LottoTab(QWidget):
     def _add_selected(self) -> None:
         if self.current_lotto_session is None:
             QMessageBox.warning(
-                self, "No session",
+                self,
+                "No session",
                 "Please select or create a session first.",
             )
             return
@@ -1218,7 +1265,7 @@ class LottoTab(QWidget):
         self._board_worker = None
         self.lotto_progress.setVisible(False)
         self.generate_pdfs_btn.setEnabled(bool(self._preview_images))
-        self._last_board_pdf  = board_path
+        self._last_board_pdf = board_path
         self._last_cutout_pdf = cutout_path
         self.open_board_btn.setVisible(True)
         self.open_cutout_btn.setVisible(True)
@@ -1234,18 +1281,36 @@ class LottoTab(QWidget):
         QMessageBox.critical(self, "Generation failed", msg)
 
     def _open_pdf(self, path: Optional[str]) -> None:
-        if not path or not Path(path).exists():
+        if path:
+            open_file(path)
+
+    # ── Session management ─────────────────────────────────────────────────────
+
+    def _refresh_sessions(self) -> None:
+        current_name: Optional[str] = None
+        if self.lotto_session_list.currentItem():
+            p: Path = self.lotto_session_list.currentItem().data(
+                Qt.ItemDataRole.UserRole
+            )
+            current_name = p.name
+
+        self.lotto_session_list.clear()
+        if not LOTTO_SESSIONS_DIR.exists():
             return
-        import subprocess
-        if sys.platform == "win32":
-            os.startfile(path)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
+
+        restore_item: Optional[QListWidgetItem] = None
+        for s in sorted(p for p in LOTTO_SESSIONS_DIR.iterdir() if p.is_dir()):
+            count = sum(1 for f in s.iterdir() if f.suffix.lower() in IMAGE_EXTS)
+            item = QListWidgetItem(f"{s.name}  ({count})")
+            item.setData(Qt.ItemDataRole.UserRole, s)
+            self.lotto_session_list.addItem(item)
+            if s.name == current_name:
+                restore_item = item
+
+        if restore_item:
+            self.lotto_session_list.setCurrentItem(restore_item)
 
 
-# ── Tegnprotokoll tab ──────────────────────────────────────────────────────────────
 class TegnprotokollTab(QWidget):
     """Tab for building a sign protocol (Tegnprotokoll): search Tegnbanken,
     add sign images, annotate with per-sign descriptions, generate a
@@ -1254,15 +1319,15 @@ class TegnprotokollTab(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
 
-        self.current_session: Optional[Path]              = None
-        self._descriptions:   dict                        = {}
-        self._session_items:  List[Path]                  = []
-        self._search_worker:  Optional[TegnprotokollSearchWorker]  = None
-        self._download_workers: Set[TegnprotokollDownloadWorker]  = set()
-        self._pdf_worker:     Optional[TegnprotokollPdfWorker]     = None
+        self.current_session: Optional[Path] = None
+        self._descriptions: dict = {}
+        self._session_items: List[Path] = []
+        self._search_worker: Optional[TegnprotokollSearchWorker] = None
+        self._download_workers: Set[TegnprotokollDownloadWorker] = set()
+        self._pdf_worker: Optional[TegnprotokollPdfWorker] = None
         self._preview_worker: Optional[TegnprotokollPreviewWorker] = None
         self._stale_preview_workers: Set[TegnprotokollPreviewWorker] = set()
-        self._preview_page:        int = 0
+        self._preview_page: int = 0
         self._preview_total_pages: int = 1
         self._last_pdf: Optional[str] = None
 
@@ -1300,20 +1365,26 @@ class TegnprotokollTab(QWidget):
         self.tegn_session_list.currentItemChanged.connect(self._on_session_changed)
         layout.addWidget(self.tegn_session_list, stretch=1)
 
-        new_btn = QPushButton("+ Ny session")
+        new_btn = QPushButton("+ New session")
         new_btn.clicked.connect(self._new_session)
         layout.addWidget(new_btn)
 
-        sep = QLabel("S\u00f8k i Tegnbank")
+        sep_row = QHBoxLayout()
+        sep = QLabel("Search Signs")
         sep.setStyleSheet("font-weight: bold; font-size: 13px; padding: 8px 0 2px;")
-        layout.addWidget(sep)
+        sep_row.addWidget(sep, stretch=1)
+        refresh_btn = QPushButton("Refresh database")
+        refresh_btn.setToolTip("Clear cache and reload sign data")
+        refresh_btn.clicked.connect(self._refresh_tegnbank)
+        sep_row.addWidget(refresh_btn)
+        layout.addLayout(sep_row)
 
         search_row = QHBoxLayout()
         self.tegn_search_input = QLineEdit()
-        self.tegn_search_input.setPlaceholderText("S\u00f8k etter tegn\u2026")
+        self.tegn_search_input.setPlaceholderText("Search for signs…")
         self.tegn_search_input.returnPressed.connect(self._do_search)
         search_row.addWidget(self.tegn_search_input, stretch=1)
-        self.tegn_search_btn = QPushButton("S\u00f8k")
+        self.tegn_search_btn = QPushButton("Search")
         self.tegn_search_btn.clicked.connect(self._do_search)
         search_row.addWidget(self.tegn_search_btn)
         layout.addLayout(search_row)
@@ -1326,9 +1397,15 @@ class TegnprotokollTab(QWidget):
         self.tegn_result_list.setSelectionMode(
             QListWidget.SelectionMode.ExtendedSelection
         )
+        self.tegn_result_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.tegn_result_list.customContextMenuRequested.connect(
+            self._result_context_menu
+        )
         layout.addWidget(self.tegn_result_list, stretch=2)
 
-        self.tegn_add_btn = QPushButton("Legg til valgte i session")
+        self.tegn_add_btn = QPushButton("Add selected to session")
         self.tegn_add_btn.setEnabled(False)
         self.tegn_add_btn.clicked.connect(self._add_selected)
         layout.addWidget(self.tegn_add_btn)
@@ -1339,7 +1416,7 @@ class TegnprotokollTab(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(4, 0, 4, 0)
 
-        self.tegn_session_title = QLabel("Velg en session")
+        self.tegn_session_title = QLabel("Select a session")
         self.tegn_session_title.setStyleSheet(
             "font-weight: bold; font-size: 13px; padding: 2px 0;"
         )
@@ -1353,9 +1430,7 @@ class TegnprotokollTab(QWidget):
         self.tegn_signs_list.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu
         )
-        self.tegn_signs_list.customContextMenuRequested.connect(
-            self._sign_context_menu
-        )
+        self.tegn_signs_list.customContextMenuRequested.connect(self._sign_context_menu)
         layout.addWidget(self.tegn_signs_list, stretch=1)
         return panel
 
@@ -1365,7 +1440,7 @@ class TegnprotokollTab(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(4, 0, 0, 0)
 
-        lbl = QLabel("Forh\u00e5ndsvisning")
+        lbl = QLabel("Page preview")
         lbl.setStyleSheet("font-weight: bold; font-size: 13px; padding: 2px 0;")
         layout.addWidget(lbl)
 
@@ -1374,7 +1449,7 @@ class TegnprotokollTab(QWidget):
         self.tegn_preview_scroll.setAlignment(
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
         )
-        self.tegn_preview_label = QLabel("Ingen session valgt")
+        self.tegn_preview_label = QLabel("No session selected")
         self.tegn_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.tegn_preview_label.setWordWrap(True)
         self.tegn_preview_scroll.setWidget(self.tegn_preview_label)
@@ -1382,14 +1457,14 @@ class TegnprotokollTab(QWidget):
 
         nav = QHBoxLayout()
         nav.setContentsMargins(0, 2, 0, 0)
-        self.tegn_prev_btn = QPushButton("\u2190 Forrige")
+        self.tegn_prev_btn = QPushButton("← Prev")
         self.tegn_prev_btn.setEnabled(False)
         self.tegn_prev_btn.clicked.connect(self._prev_page)
         nav.addWidget(self.tegn_prev_btn)
         self.tegn_page_label = QLabel("")
         self.tegn_page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         nav.addWidget(self.tegn_page_label, stretch=1)
-        self.tegn_next_btn = QPushButton("Neste \u2192")
+        self.tegn_next_btn = QPushButton("Next →")
         self.tegn_next_btn.setEnabled(False)
         self.tegn_next_btn.clicked.connect(self._next_page)
         nav.addWidget(self.tegn_next_btn)
@@ -1404,17 +1479,15 @@ class TegnprotokollTab(QWidget):
         self.tegn_progress.setVisible(False)
         layout.addWidget(self.tegn_progress)
 
-        self.tegn_generate_btn = QPushButton("Generer Tegnprotokoll PDF")
+        self.tegn_generate_btn = QPushButton("Generate Sign Protocol PDF")
         self.tegn_generate_btn.setEnabled(False)
         self.tegn_generate_btn.setMinimumWidth(160)
         self.tegn_generate_btn.clicked.connect(self._generate_pdf)
         layout.addWidget(self.tegn_generate_btn)
 
-        self.tegn_open_btn = QPushButton("\u00c5pne PDF")
+        self.tegn_open_btn = QPushButton("Open PDF")
         self.tegn_open_btn.setVisible(False)
-        self.tegn_open_btn.clicked.connect(
-            lambda: self._open_pdf(self._last_pdf)
-        )
+        self.tegn_open_btn.clicked.connect(lambda: self._open_pdf(self._last_pdf))
         layout.addWidget(self.tegn_open_btn)
         return panel
 
@@ -1433,11 +1506,9 @@ class TegnprotokollTab(QWidget):
             return
 
         restore_item: Optional[QListWidgetItem] = None
-        for s in sorted(
-            p for p in TEGNPROTOKOLL_SESSIONS_DIR.iterdir() if p.is_dir()
-        ):
+        for s in sorted(p for p in TEGNPROTOKOLL_SESSIONS_DIR.iterdir() if p.is_dir()):
             count = sum(1 for f in s.iterdir() if f.suffix.lower() in IMAGE_EXTS)
-            item  = QListWidgetItem(f"{s.name}  ({count})")
+            item = QListWidgetItem(f"{s.name}  ({count})")
             item.setData(Qt.ItemDataRole.UserRole, s)
             self.tegn_session_list.addItem(item)
             if s.name == current_name:
@@ -1446,17 +1517,15 @@ class TegnprotokollTab(QWidget):
         if restore_item:
             self.tegn_session_list.setCurrentItem(restore_item)
 
-    def _on_session_changed(
-        self, current: QListWidgetItem, _previous
-    ) -> None:
+    def _on_session_changed(self, current: QListWidgetItem, _previous) -> None:
         if current is None:
             self.current_session = None
-            self._descriptions   = {}
-            self._session_items  = []
-            self.tegn_session_title.setText("Velg en session")
+            self._descriptions = {}
+            self._session_items = []
+            self.tegn_session_title.setText("Select a session")
             self.tegn_signs_list.clear()
             self.tegn_generate_btn.setEnabled(False)
-            self.tegn_preview_label.setText("Ingen session valgt")
+            self.tegn_preview_label.setText("No session selected")
             self._preview_page = 0
             self._preview_total_pages = 1
             self._update_nav_buttons()
@@ -1470,17 +1539,19 @@ class TegnprotokollTab(QWidget):
 
     def _new_session(self) -> None:
         name, ok = QInputDialog.getText(
-            self, "Ny session",
-            "Sesjonsnavn (f.eks. 2026-04-tegn-hjemmet):",
+            self,
+            "New sign protocol session",
+            "Session name (e.g. 2026-04-signs-home):",
         )
         if not ok or not name.strip():
             return
-        name     = name.strip().replace(" ", "-")
+        name = name.strip().replace(" ", "-")
         new_path = TEGNPROTOKOLL_SESSIONS_DIR / name
         if new_path.exists():
             QMessageBox.warning(
-                self, "Finnes allerede",
-                f"Session \u2018{name}\u2019 finnes allerede.",
+                self,
+                "Already exists",
+                f"Session '{name}' already exists.",
             )
             return
         new_path.mkdir(parents=True)
@@ -1500,9 +1571,7 @@ class TegnprotokollTab(QWidget):
         desc_file = self.current_session / "descriptions.json"
         if desc_file.exists():
             try:
-                self._descriptions = json.loads(
-                    desc_file.read_text("utf-8")
-                )
+                self._descriptions = json.loads(desc_file.read_text("utf-8"))
             except Exception:
                 self._descriptions = {}
 
@@ -1515,8 +1584,8 @@ class TegnprotokollTab(QWidget):
                 json.dumps(self._descriptions, ensure_ascii=False, indent=2),
                 "utf-8",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            self.tegn_status.setText(f"Warning: could not save descriptions — {exc}")
 
     # ── Sign / image management ─────────────────────────────────────────────────
 
@@ -1525,8 +1594,7 @@ class TegnprotokollTab(QWidget):
         if self.current_session is None:
             return
         images = sorted(
-            p for p in self.current_session.iterdir()
-            if p.suffix.lower() in IMAGE_EXTS
+            p for p in self.current_session.iterdir() if p.suffix.lower() in IMAGE_EXTS
         )
         for img_path in images:
             item = QListWidgetItem(
@@ -1556,41 +1624,41 @@ class TegnprotokollTab(QWidget):
         if item is None:
             return
         img_path: Path = item.data(Qt.ItemDataRole.UserRole)
-        menu           = QMenu(self)
-        rename_action  = menu.addAction("Gi nytt navn\u2026")
-        desc_action    = menu.addAction("Sett beskrivelse\u2026")
-        remove_action  = menu.addAction("Fjern fra session")
-        action         = menu.exec(self.tegn_signs_list.mapToGlobal(pos))
+        menu = QMenu(self)
+        rename_action = menu.addAction("Rename…")
+        desc_action = menu.addAction("Set description…")
+        remove_action = menu.addAction("Remove from session")
+        action = menu.exec(self.tegn_signs_list.mapToGlobal(pos))
 
         if action == rename_action:
             current_label = img_path.stem.replace("_", " ")
             new_label, ok = QInputDialog.getText(
-                self, "Gi nytt navn", "Tegnlabel:", text=current_label
+                self, "Rename sign", "Sign label:", text=current_label
             )
             if ok and new_label.strip() and new_label.strip() != current_label:
-                old_stem  = img_path.stem
-                new_stem  = new_label.strip().replace(" ", "_")
-                new_path  = img_path.with_stem(new_stem)
+                old_stem = img_path.stem
+                new_stem = new_label.strip().replace(" ", "_")
+                new_path = img_path.with_stem(new_stem)
                 if new_path.exists():
                     QMessageBox.warning(
-                        self, "Navn opptatt",
-                        f"\u2018{new_path.name}\u2019 finnes allerede.",
+                        self,
+                        "Name taken",
+                        f"'{new_path.name}' already exists.",
                     )
                 else:
                     img_path.rename(new_path)
                     if old_stem in self._descriptions:
-                        self._descriptions[new_stem] = self._descriptions.pop(
-                            old_stem
-                        )
+                        self._descriptions[new_stem] = self._descriptions.pop(old_stem)
                         self._save_descriptions()
                     self._load_session_items()
 
         elif action == desc_action:
-            stem         = img_path.stem
+            stem = img_path.stem
             current_desc = self._descriptions.get(stem, "")
             new_desc, ok = QInputDialog.getText(
-                self, "Sett beskrivelse",
-                "Beskriv hvordan barnet bruker tegnet:",
+                self,
+                "Set description",
+                "Describe how the child uses the sign:",
                 text=current_desc,
             )
             if ok:
@@ -1602,11 +1670,15 @@ class TegnprotokollTab(QWidget):
                 self._update_preview()
 
         elif action == remove_action:
-            if QMessageBox.question(
-                self, "Fjern tegn",
-                f"Slett \u2018{img_path.name}\u2019 fra denne sessionen?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            ) == QMessageBox.StandardButton.Yes:
+            if (
+                QMessageBox.question(
+                    self,
+                    "Remove sign",
+                    f"Delete '{img_path.name}' from this session?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                == QMessageBox.StandardButton.Yes
+            ):
                 self._descriptions.pop(img_path.stem, None)
                 self._save_descriptions()
                 img_path.unlink(missing_ok=True)
@@ -1617,7 +1689,9 @@ class TegnprotokollTab(QWidget):
 
     def _schedule_preview(self) -> None:
         ipp = _tegn_items_per_page()
-        total = max(1, -(-len(self._session_items) // ipp)) if self._session_items else 1
+        total = (
+            max(1, -(-len(self._session_items) // ipp)) if self._session_items else 1
+        )
         self._preview_total_pages = total
         self._update_nav_buttons()
         self._update_preview()
@@ -1630,10 +1704,8 @@ class TegnprotokollTab(QWidget):
                 pass
             old = self._preview_worker
             self._stale_preview_workers.add(old)
-            old.finished.connect(
-                lambda w=old: self._stale_preview_workers.discard(w)
-            )
-        self.tegn_preview_label.setText("Genererer forh\u00e5ndsvisning\u2026")
+            old.finished.connect(lambda w=old: self._stale_preview_workers.discard(w))
+        self.tegn_preview_label.setText("Rendering…")
         worker = TegnprotokollPreviewWorker(
             self._session_items, self._descriptions.copy(), self._preview_page
         )
@@ -1643,11 +1715,11 @@ class TegnprotokollTab(QWidget):
 
     def _update_nav_buttons(self) -> None:
         total = self._preview_total_pages
-        page  = self._preview_page
+        page = self._preview_page
         self.tegn_prev_btn.setEnabled(page > 0)
         self.tegn_next_btn.setEnabled(page < total - 1)
         self.tegn_page_label.setText(
-            f"Side {page + 1} / {total}" if self._session_items else ""
+            f"Page {page + 1} / {total}" if self._session_items else ""
         )
 
     def _prev_page(self) -> None:
@@ -1664,7 +1736,7 @@ class TegnprotokollTab(QWidget):
 
     def _on_preview_ready(self, pixmap: QPixmap) -> None:
         if pixmap.isNull():
-            self.tegn_preview_label.setText("Ingen tegn i session")
+            self.tegn_preview_label.setText("No signs in session")
             return
         max_w = max(100, self.tegn_preview_scroll.width() - 20)
         if pixmap.width() > max_w:
@@ -1675,6 +1747,14 @@ class TegnprotokollTab(QWidget):
 
     # ── Search ────────────────────────────────────────────────────────────────
 
+    def _refresh_tegnbank(self) -> None:
+        import tegnbanken
+
+        tegnbanken.invalidate_cache()
+        self.tegn_search_status.setText(
+            "Cache cleared — next search will fetch fresh data."
+        )
+
     def _do_search(self) -> None:
         query = self.tegn_search_input.text().strip()
         if not query or self._search_worker is not None:
@@ -1682,7 +1762,7 @@ class TegnprotokollTab(QWidget):
         self.tegn_search_btn.setEnabled(False)
         self.tegn_result_list.clear()
         self.tegn_add_btn.setEnabled(False)
-        self.tegn_search_status.setText("S\u00f8ker\u2026")
+        self.tegn_search_status.setText("Searching…")
 
         worker = TegnprotokollSearchWorker(query)
         worker.results.connect(self._on_search_results)
@@ -1699,33 +1779,47 @@ class TegnprotokollTab(QWidget):
     def _on_search_results(self, results: list) -> None:
         self.tegn_result_list.clear()
         if not results:
-            self.tegn_search_status.setText("Ingen resultater.")
+            self.tegn_search_status.setText("No results.")
             return
-        self.tegn_search_status.setText(f"{len(results)} resultat(er)")
+        self.tegn_search_status.setText(f"{len(results)} result(s)")
         for r in results:
             has_img = bool(r.get("foto") or r.get("la_hend"))
-            label   = ("\u2713 " if has_img else "\u25a1 ") + r["word"]
-            item    = QListWidgetItem(label)
+            label = ("\u2713 " if has_img else "\u25a1 ") + r["word"]
+            item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, r)
             if not has_img:
                 item.setForeground(
-                    self.palette().color(
-                        self.palette().ColorRole.PlaceholderText
-                    )
+                    self.palette().color(self.palette().ColorRole.PlaceholderText)
                 )
             self.tegn_result_list.addItem(item)
         self.tegn_add_btn.setEnabled(True)
 
     def _on_search_error(self, msg: str) -> None:
-        self.tegn_search_status.setText(f"Feil: {msg}")
+        self.tegn_search_status.setText(f"Error: {msg}")
 
     # ── Add signs ──────────────────────────────────────────────────────────────
+
+    def _result_context_menu(self, pos) -> None:
+        item = self.tegn_result_list.itemAt(pos)
+        if item is None:
+            return
+        menu = QMenu(self)
+        add_action = menu.addAction("Add to session")
+        action = menu.exec(self.tegn_result_list.mapToGlobal(pos))
+        if action == add_action:
+            if self.current_session is None:
+                QMessageBox.warning(
+                    self, "No session", "Please select or create a session first."
+                )
+                return
+            self._start_download(item.data(Qt.ItemDataRole.UserRole))
 
     def _add_selected(self) -> None:
         if self.current_session is None:
             QMessageBox.warning(
-                self, "Ingen session",
-                "Velg eller opprett en session f\u00f8rst.",
+                self,
+                "No session",
+                "Please select or create a session first.",
             )
             return
         selected = self.tegn_result_list.selectedItems()
@@ -1738,9 +1832,7 @@ class TegnprotokollTab(QWidget):
         worker = TegnprotokollDownloadWorker(record, self.current_session)
         worker.done.connect(self._on_download_done)
         worker.error.connect(self._on_download_error)
-        worker.finished.connect(
-            lambda w=worker: self._download_workers.discard(w)
-        )
+        worker.finished.connect(lambda w=worker: self._download_workers.discard(w))
         worker.finished.connect(worker.deleteLater)
         self._download_workers.add(worker)
         worker.start()
@@ -1750,7 +1842,7 @@ class TegnprotokollTab(QWidget):
         self._load_session_items()
 
     def _on_download_error(self, msg: str) -> None:
-        self.tegn_status.setText(f"Nedlastingsfeil: {msg}")
+        self.tegn_status.setText(f"Download error: {msg}")
 
     # ── PDF generation ─────────────────────────────────────────────────────────
 
@@ -1760,7 +1852,7 @@ class TegnprotokollTab(QWidget):
         self.tegn_generate_btn.setEnabled(False)
         self.tegn_open_btn.setVisible(False)
         self.tegn_progress.setVisible(True)
-        self.tegn_status.setText("Genererer PDF\u2026")
+        self.tegn_status.setText("Generating PDF…")
 
         worker = TegnprotokollPdfWorker(self.current_session)
         worker.done.connect(self._on_generate_done)
@@ -1775,25 +1867,18 @@ class TegnprotokollTab(QWidget):
         self.tegn_generate_btn.setEnabled(bool(self._session_items))
         self._last_pdf = pdf_path
         self.tegn_open_btn.setVisible(True)
-        self.tegn_status.setText(f"Lagret: {Path(pdf_path).name}")
+        self.tegn_status.setText(f"Saved: {Path(pdf_path).name}")
 
     def _on_generate_error(self, msg: str) -> None:
         self._pdf_worker = None
         self.tegn_progress.setVisible(False)
         self.tegn_generate_btn.setEnabled(bool(self._session_items))
-        self.tegn_status.setText(f"Feil: {msg}")
-        QMessageBox.critical(self, "Generering feilet", msg)
+        self.tegn_status.setText(f"Error: {msg}")
+        QMessageBox.critical(self, "Generation failed", msg)
 
     def _open_pdf(self, path: Optional[str]) -> None:
-        if not path or not Path(path).exists():
-            return
-        import subprocess
-        if sys.platform == "win32":
-            os.startfile(path)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
+        if path:
+            open_file(path)
 
 
 # ── Main window ────────────────────────────────────────────────────────────────
@@ -1848,7 +1933,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(LottoTab(), "Lotto")
 
         # ── Tegnprotokoll tab ──────────────────────────────────────────────────
-        tabs.addTab(TegnprotokollTab(), "Tegnprotokoll")
+        tabs.addTab(TegnprotokollTab(), "Sign Protocol")
 
     def _build_session_panel(self) -> QWidget:
         panel = QWidget()
@@ -2008,8 +2093,9 @@ class MainWindow(QMainWindow):
         name = name.strip().replace(" ", "-")
         new_path = SESSIONS_DIR / name
         if new_path.exists():
-            QMessageBox.warning(self, "Already exists",
-                                f"Session '{name}' already exists.")
+            QMessageBox.warning(
+                self, "Already exists", f"Session '{name}' already exists."
+            )
             return
         new_path.mkdir(parents=True)
         self._refresh_sessions()
@@ -2028,8 +2114,7 @@ class MainWindow(QMainWindow):
             return
 
         images = sorted(
-            p for p in self.current_session.iterdir()
-            if p.suffix.lower() in IMAGE_EXTS
+            p for p in self.current_session.iterdir() if p.suffix.lower() in IMAGE_EXTS
         )
         for img_path in images:
             item = QListWidgetItem(
@@ -2045,7 +2130,7 @@ class MainWindow(QMainWindow):
 
     def _make_thumb(self, img_path: Path) -> QPixmap:
         try:
-            img = Image.open(img_path).convert("RGB")
+            img = to_rgb(Image.open(img_path))
             img.thumbnail((96, 96), Image.LANCZOS)
             buf = io.BytesIO()
             img.save(buf, format="PNG")
@@ -2054,66 +2139,11 @@ class MainWindow(QMainWindow):
         except Exception:
             return QPixmap()
 
-    def _schedule_preview(self, images: List[Path]) -> None:
-        self._preview_images = images
-        self._preview_total_pages = max(
-            1, -(-len(images) // _preview_cards_per_page()) if images else 1
-        )
-        self._update_nav_buttons()
-        self._update_preview()
-
-    def _update_preview(self) -> None:
-        if self._preview_worker is not None:
-            try:
-                self._preview_worker.ready.disconnect()
-            except RuntimeError:
-                pass
-            # Keep the old thread alive in the stale list until it finishes
-            old = self._preview_worker
-            self._stale_preview_workers.add(old)
-            old.finished.connect(lambda w=old: self._stale_preview_workers.discard(w))
-        self.preview_label.setText("Rendering…")
-        worker = PreviewWorker(self._preview_images, self._preview_page)
-        worker.ready.connect(self._on_preview_ready)
-        self._preview_worker = worker
-        worker.start()
-
-    def _update_nav_buttons(self) -> None:
-        total = self._preview_total_pages
-        page = self._preview_page
-        self.prev_page_btn.setEnabled(page > 0)
-        self.next_page_btn.setEnabled(page < total - 1)
-        self.page_counter_label.setText(
-            f"Page {page + 1} / {total}" if self._preview_images else ""
-        )
-
-    def _prev_preview_page(self) -> None:
-        if self._preview_page > 0:
-            self._preview_page -= 1
-            self._update_nav_buttons()
-            self._update_preview()
-
-    def _next_preview_page(self) -> None:
-        if self._preview_page < self._preview_total_pages - 1:
-            self._preview_page += 1
-            self._update_nav_buttons()
-            self._update_preview()
-
-    def _on_preview_ready(self, pixmap: QPixmap) -> None:
-        if pixmap.isNull():
-            self.preview_label.setText("No images")
-            return
-        max_w = max(100, self.preview_scroll.width() - 20)
-        if pixmap.width() > max_w:
-            pixmap = pixmap.scaledToWidth(
-                max_w, Qt.TransformationMode.SmoothTransformation
-            )
-        self.preview_label.setPixmap(pixmap)
-
     def _on_images_dropped(self, paths: List[Path]) -> None:
         if self.current_session is None:
-            QMessageBox.warning(self, "No session",
-                                "Please select or create a session first.")
+            QMessageBox.warning(
+                self, "No session", "Please select or create a session first."
+            )
             return
         for src in paths:
             dst = self.current_session / src.name
@@ -2124,11 +2154,14 @@ class MainWindow(QMainWindow):
 
     def _add_images_dialog(self) -> None:
         if self.current_session is None:
-            QMessageBox.warning(self, "No session",
-                                "Please select or create a session first.")
+            QMessageBox.warning(
+                self, "No session", "Please select or create a session first."
+            )
             return
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Add images", str(Path.home()),
+            self,
+            "Add images",
+            str(Path.home()),
             "Images (*.jpg *.jpeg *.png *.webp *.avif)",
         )
         if files:
@@ -2152,17 +2185,22 @@ class MainWindow(QMainWindow):
                 new_stem = new_label.strip().replace(" ", "_")
                 new_path = img_path.with_stem(new_stem)
                 if new_path.exists():
-                    QMessageBox.warning(self, "Name taken",
-                                        f"'{new_path.name}' already exists.")
+                    QMessageBox.warning(
+                        self, "Name taken", f"'{new_path.name}' already exists."
+                    )
                 else:
                     img_path.rename(new_path)
                     self._load_images()
         elif action == remove_action:
-            if QMessageBox.question(
-                self, "Remove image",
-                f"Delete '{img_path.name}' from this session?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            ) == QMessageBox.StandardButton.Yes:
+            if (
+                QMessageBox.question(
+                    self,
+                    "Remove image",
+                    f"Delete '{img_path.name}' from this session?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                == QMessageBox.StandardButton.Yes
+            ):
                 img_path.unlink(missing_ok=True)
                 self._refresh_sessions()
                 self._load_images()
@@ -2200,15 +2238,64 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Generation failed", message)
 
     def _open_pdf(self) -> None:
-        if not self._last_pdf or not Path(self._last_pdf).exists():
+        if self._last_pdf:
+            open_file(self._last_pdf)
+
+    # ── Preview ────────────────────────────────────────────────────────────────
+
+    def _schedule_preview(self, images: List[Path]) -> None:
+        self._preview_images = images
+        cpp = _preview_cards_per_page()
+        self._preview_total_pages = max(1, -(-len(images) // cpp) if images else 1)
+        self._update_nav_buttons()
+        self._update_preview()
+
+    def _update_preview(self) -> None:
+        if self._preview_worker is not None:
+            try:
+                self._preview_worker.ready.disconnect()
+            except RuntimeError:
+                pass
+            old = self._preview_worker
+            self._stale_preview_workers.add(old)
+            old.finished.connect(lambda w=old: self._stale_preview_workers.discard(w))
+        self.preview_label.setText("Rendering…")
+        worker = PreviewWorker(self._preview_images, self._preview_page)
+        worker.ready.connect(self._on_preview_ready)
+        self._preview_worker = worker
+        worker.start()
+
+    def _update_nav_buttons(self) -> None:
+        total = self._preview_total_pages
+        page = self._preview_page
+        self.prev_page_btn.setEnabled(page > 0)
+        self.next_page_btn.setEnabled(page < total - 1)
+        self.page_counter_label.setText(
+            f"Page {page + 1} / {total}" if self._preview_images else ""
+        )
+
+    def _prev_preview_page(self) -> None:
+        if self._preview_page > 0:
+            self._preview_page -= 1
+            self._update_nav_buttons()
+            self._update_preview()
+
+    def _next_preview_page(self) -> None:
+        if self._preview_page < self._preview_total_pages - 1:
+            self._preview_page += 1
+            self._update_nav_buttons()
+            self._update_preview()
+
+    def _on_preview_ready(self, pixmap: QPixmap) -> None:
+        if pixmap.isNull():
+            self.preview_label.setText("No cards in session")
             return
-        import subprocess
-        if sys.platform == "win32":
-            os.startfile(self._last_pdf)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", self._last_pdf])
-        else:
-            subprocess.Popen(["xdg-open", self._last_pdf])
+        max_w = max(100, self.preview_scroll.width() - 20)
+        if pixmap.width() > max_w:
+            pixmap = pixmap.scaledToWidth(
+                max_w, Qt.TransformationMode.SmoothTransformation
+            )
+        self.preview_label.setPixmap(pixmap)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -2218,12 +2305,12 @@ def _make_app_icon() -> QIcon:
     # Card colours: warm yellow, sky blue, soft green, coral
     colours = [(255, 190, 70), (90, 175, 255), (120, 205, 110), (255, 110, 110)]
     for size in (16, 24, 32, 48, 64, 128, 256):
-        img  = Image.new("RGBA", (size, size), (245, 245, 245, 255))
+        img = Image.new("RGBA", (size, size), (245, 245, 245, 255))
         draw = ImageDraw.Draw(img, "RGBA")
 
-        margin   = max(1, size // 10)
-        gap      = max(1, size // 14)
-        card_sz  = (size - 2 * margin - gap) // 2
+        margin = max(1, size // 10)
+        gap = max(1, size // 14)
+        card_sz = (size - 2 * margin - gap) // 2
         border_w = max(1, size // 48)
 
         for idx, fill in enumerate(colours):

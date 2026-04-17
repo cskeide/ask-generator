@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -33,38 +32,35 @@ from PIL import Image
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
+from pdf_utils import (
+    IMAGE_EXTS,
+    to_rgb,
+    register_nordic_bold_font,
+    register_nordic_regular_font,
+    fit_text,
+)
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-def _to_rgb(img: Image.Image) -> Image.Image:
-    """Convert any Pillow image to RGB, handling palette+transparency correctly."""
-    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-        img = img.convert("RGBA")
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[3])
-        return bg
-    return img.convert("RGB")
+# Alias kept for any external callers
+_to_rgb = to_rgb
 
 
 # ── Layout constants ───────────────────────────────────────────────────────────
 
-PAGE_MARGIN    = 10 * mm   # page edge → table edge
-ROW_HEIGHT     = 35 * mm   # height of each data row
-IMAGE_PAD      = 2  * mm   # padding around sign image inside its cell
-CELL_PAD_H     = 3  * mm   # horizontal text padding inside word/desc cells
-CELL_PAD_V     = 2  * mm   # vertical text padding inside word/desc cells
-BORDER_WIDTH   = 0.5       # pt – cell border thickness
-HEADER_FONT_PT = 9         # column header font size
-WORD_FONT_PT   = 14        # maximum word font size (shrinks to fit)
-DESC_FONT_PT   = 9         # description body font size
-FOOTER_FONT_PT = 7         # attribution footer font size
-TITLE_HEIGHT   = 12 * mm   # space reserved for the page title above the table
-HEADER_ROW_H   = 8  * mm   # height of the column-header row
-FOOTER_H       = 8  * mm   # height of the attribution footer at page bottom
+PAGE_MARGIN = 10 * mm  # page edge → table edge
+ROW_HEIGHT = 35 * mm  # height of each data row
+IMAGE_PAD = 2 * mm  # padding around sign image inside its cell
+CELL_PAD_H = 3 * mm  # horizontal text padding inside word/desc cells
+CELL_PAD_V = 2 * mm  # vertical text padding inside word/desc cells
+BORDER_WIDTH = 0.5  # pt – cell border thickness
+HEADER_FONT_PT = 9  # column header font size
+WORD_FONT_PT = 14  # maximum word font size (shrinks to fit)
+DESC_FONT_PT = 9  # description body font size
+FOOTER_FONT_PT = 7  # attribution footer font size
+TITLE_HEIGHT = 12 * mm  # space reserved for the page title above the table
+HEADER_ROW_H = 8 * mm  # height of the column-header row
+FOOTER_H = 8 * mm  # height of the attribution footer at page bottom
 
 # Column widths as fractions of the usable page width
 _COL_FRACS = (0.27, 0.33, 0.40)  # word | image | description
@@ -72,53 +68,28 @@ _COL_FRACS = (0.27, 0.33, 0.40)  # word | image | description
 
 # ── Font registration ──────────────────────────────────────────────────────────
 
+
 def _register_bold_font() -> str:
-    candidates = [
-        "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/Library/Fonts/Arial Bold.ttf",
-        "C:/Windows/Fonts/arialbd.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            pdfmetrics.registerFont(TTFont("_TegnBold", path))
-            return "_TegnBold"
-    return "Helvetica-Bold"
+    return register_nordic_bold_font("_TegnBold")
 
 
 def _register_regular_font() -> str:
-    candidates = [
-        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/Library/Fonts/Arial.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            pdfmetrics.registerFont(TTFont("_TegnReg", path))
-            return "_TegnReg"
-    return "Helvetica"
+    return register_nordic_regular_font("_TegnReg")
 
 
 # ── Text helpers ───────────────────────────────────────────────────────────────
 
-def _fit_font(c: canvas.Canvas, font: str, text: str,
-              max_width: float, start_pt: float) -> float:
+
+def _fit_font(
+    c: canvas.Canvas, font: str, text: str, max_width: float, start_pt: float
+) -> float:
     """Largest font size ≤ *start_pt* at which *text* fits *max_width*."""
-    size = start_pt
-    while size > 4:
-        if c.stringWidth(text, font, size) <= max_width:
-            return size
-        size -= 0.5
-    return size
+    return fit_text(c, font, text, max_width, start_pt)
 
 
-def _wrap(c: canvas.Canvas, font: str, size: float,
-          text: str, max_width: float) -> list[str]:
+def _wrap(
+    c: canvas.Canvas, font: str, size: float, text: str, max_width: float
+) -> list[str]:
     """Word-wrap *text* into lines that each fit *max_width*."""
     lines: list[str] = []
     current = ""
@@ -136,6 +107,7 @@ def _wrap(c: canvas.Canvas, font: str, size: float,
 
 
 # ── Row drawing ────────────────────────────────────────────────────────────────
+
 
 def _draw_row(
     c: canvas.Canvas,
@@ -158,8 +130,8 @@ def _draw_row(
     row_bottom = row_y_top - row_h
     total_w = w_word + w_img + w_desc
 
-    x0 = row_x               # left edge of word cell
-    x1 = row_x + w_word      # left edge of image cell
+    x0 = row_x  # left edge of word cell
+    x1 = row_x + w_word  # left edge of image cell
     x2 = row_x + w_word + w_img  # left edge of desc cell
 
     # ── Cell borders ──────────────────────────────────────────────────────────
@@ -186,7 +158,7 @@ def _draw_row(
         avail_w = w_img - 2 * IMAGE_PAD
         avail_h = row_h - 2 * IMAGE_PAD
         try:
-            pil = _to_rgb(Image.open(img_path))
+            pil = to_rgb(Image.open(img_path))
             scale = min(avail_w / pil.width, avail_h / pil.height)
             new_w = int(pil.width * scale)
             new_h = int(pil.height * scale)
@@ -231,6 +203,7 @@ def _draw_row(
 
 # ── Public entry point ─────────────────────────────────────────────────────────
 
+
 def make_tegnprotokoll(
     session_path_str: str,
     output_dir: Optional[Path] = None,
@@ -252,8 +225,9 @@ def make_tegnprotokoll(
         Where to write the PDF.  Defaults to ``{project_root}/output``.
 
     Returns the output :class:`~pathlib.Path`.
+    Raises :exc:`ValueError` on invalid input (empty session, bad path, etc.).
     """
-    session_path = Path(session_path_str)
+    session_path = Path(session_path_str).resolve()
     if output_dir is None:
         output_dir = Path(__file__).resolve().parent / "output"
     output_dir = Path(output_dir)
@@ -268,20 +242,16 @@ def make_tegnprotokoll(
         except Exception:
             pass
 
-    # Collect images (skip the descriptions file itself if named oddly)
-    _EXTS = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
-    images = sorted(
-        p for p in session_path.iterdir()
-        if p.suffix.lower() in _EXTS
-    )
+    # Collect images
+    images = sorted(p for p in session_path.iterdir() if p.suffix.lower() in IMAGE_EXTS)
     if not images:
-        raise SystemExit(f"No images found in {session_path}")
+        raise ValueError(f"No images found in {session_path}")
 
     bold_font = _register_bold_font()
-    reg_font  = _register_regular_font()
+    reg_font = _register_regular_font()
 
     session_name = session_path.name
-    out_path  = output_dir / f"{session_name}_tegnprotokoll.pdf"
+    out_path = output_dir / f"{session_name}_tegnprotokoll.pdf"
     c = canvas.Canvas(str(out_path), pagesize=A4)
     page_w, page_h = A4
 
@@ -300,12 +270,12 @@ def make_tegnprotokoll(
         c.setLineWidth(0.8)
         c.setStrokeColorRGB(0.4, 0.4, 0.4)
         c.rect(table_x, y0, usable_w, HEADER_ROW_H)
-        c.line(table_x + w_word,         y0, table_x + w_word,         table_top)
+        c.line(table_x + w_word, y0, table_x + w_word, table_top)
         c.line(table_x + w_word + w_img, y0, table_x + w_word + w_img, table_top)
 
         headers = ["Tegn", "Bilde", "Hvordan barnet bruker tegnet"]
-        cws     = col_widths
-        hx      = table_x
+        cws = col_widths
+        hx = table_x
         c.setFont(bold_font, HEADER_FONT_PT)
         c.setFillColorRGB(0, 0, 0)
         for hdr, cw in zip(headers, cws):
@@ -338,17 +308,27 @@ def make_tegnprotokoll(
         return draw_header(table_top)
 
     # ── Render ─────────────────────────────────────────────────────────────────
-    current_y   = start_page(is_first=True)
-    min_y       = PAGE_MARGIN + FOOTER_H
+    current_y = start_page(is_first=True)
+    min_y = PAGE_MARGIN + FOOTER_H
 
     for img_path in images:
         if current_y - ROW_HEIGHT < min_y:
             current_y = start_page(is_first=False)
 
-        word       = img_path.stem.replace("_", " ")
-        desc       = descriptions.get(img_path.stem, "")
-        _draw_row(c, table_x, current_y, ROW_HEIGHT,
-                  col_widths, word, img_path, desc, bold_font, reg_font)
+        word = img_path.stem.replace("_", " ")
+        desc = descriptions.get(img_path.stem, "")
+        _draw_row(
+            c,
+            table_x,
+            current_y,
+            ROW_HEIGHT,
+            col_widths,
+            word,
+            img_path,
+            desc,
+            bold_font,
+            reg_font,
+        )
         current_y -= ROW_HEIGHT
 
     draw_footer()
