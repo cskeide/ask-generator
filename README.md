@@ -75,3 +75,7 @@ sessions/
 - A4 page, 3 columns × 4 rows = 12 cards per page
 - Cards are square with a border, label at top, image below
 - PDF is saved to `output/<session-name>.pdf`
+
+## License
+
+MIT © 2026 Christian Kronborg Skeide — see [LICENSE](LICENSE) for details.
