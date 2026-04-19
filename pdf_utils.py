@@ -141,6 +141,19 @@ def safe_stem(label: str) -> str:
     return stem or "image"
 
 
+_DUPLICATE_SUFFIX = re.compile(r"__\d+$")
+
+
+def stem_to_label(stem: str) -> str:
+    """Convert a filename stem to a human-readable card label.
+
+    Strips any trailing ``__N`` duplicate counter added by the GUI, then
+    replaces remaining underscores with spaces.
+    """
+    stem = _DUPLICATE_SUFFIX.sub("", stem)
+    return stem.replace("_", " ")
+
+
 # ── PDF opener ─────────────────────────────────────────────────────────────────
 
 

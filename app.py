@@ -16,7 +16,7 @@ from typing import List, Optional, Set
 
 import make_cards
 from PIL import Image, ImageDraw, ImageFont
-from pdf_utils import IMAGE_EXTS, to_rgb, safe_stem, open_file
+from pdf_utils import IMAGE_EXTS, to_rgb, safe_stem, stem_to_label, open_file
 
 
 def _to_rgb(img: Image.Image) -> Image.Image:
@@ -156,7 +156,7 @@ def render_page_preview(images: List[Path], page_index: int = 0) -> QPixmap:
             outline=(180, 180, 180),
             width=1,
         )
-        label = img_path.stem.replace("_", " ")
+        label = stem_to_label(img_path.stem)
         try:
             bbox = font.getbbox(label)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -2119,7 +2119,7 @@ class MainWindow(QMainWindow):
         for img_path in images:
             item = QListWidgetItem(
                 QIcon(self._make_thumb(img_path)),
-                img_path.stem.replace("_", " "),
+                stem_to_label(img_path.stem),
             )
             item.setData(Qt.ItemDataRole.UserRole, img_path)
             item.setSizeHint(QSize(110, 120))
@@ -2147,8 +2147,14 @@ class MainWindow(QMainWindow):
             return
         for src in paths:
             dst = self.current_session / src.name
-            if not dst.exists():
-                shutil.copy2(src, dst)
+            if dst.exists():
+                counter = 2
+                while True:
+                    dst = self.current_session / f"{src.stem}__{counter}{src.suffix}"
+                    if not dst.exists():
+                        break
+                    counter += 1
+            shutil.copy2(src, dst)
         self._refresh_sessions()
         self._load_images()
 
@@ -2174,10 +2180,11 @@ class MainWindow(QMainWindow):
         img_path: Path = item.data(Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
         rename_action = menu.addAction("Rename…")
+        duplicate_action = menu.addAction("Duplicate")
         remove_action = menu.addAction("Remove from session")
         action = menu.exec(self.image_list.mapToGlobal(pos))
         if action == rename_action:
-            current_label = img_path.stem.replace("_", " ")
+            current_label = stem_to_label(img_path.stem)
             new_label, ok = QInputDialog.getText(
                 self, "Rename card", "Card label:", text=current_label
             )
@@ -2191,6 +2198,16 @@ class MainWindow(QMainWindow):
                 else:
                     img_path.rename(new_path)
                     self._load_images()
+        elif action == duplicate_action:
+            counter = 2
+            while True:
+                dst = img_path.with_stem(f"{img_path.stem}__{counter}")
+                if not dst.exists():
+                    break
+                counter += 1
+            shutil.copy2(img_path, dst)
+            self._refresh_sessions()
+            self._load_images()
         elif action == remove_action:
             if (
                 QMessageBox.question(

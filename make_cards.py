@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 
-from pdf_utils import IMAGE_EXTS, to_rgb, register_nordic_bold_font, fit_text
+from pdf_utils import IMAGE_EXTS, to_rgb, register_nordic_bold_font, fit_text, stem_to_label
 
 
 # ── Layout constants ───────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ def _draw_card(
     font: str,
     img_path: Path,
 ) -> None:
-    label = img_path.stem.replace("_", " ")
+    label = stem_to_label(img_path.stem)
 
     # ── Border (square around the whole card) ──────────────────────────────────
     c.setLineWidth(BORDER_WIDTH)
