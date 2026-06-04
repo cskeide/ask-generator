@@ -84,6 +84,26 @@ def test_make_lotto_rejects_empty_session(tmp_path):
         make_lotto.make_board_pdf(str(empty), output_dir=tmp_path / "out")
 
 
+def test_make_board_and_cutout_single_pass(tmp_path):
+    session = _make_session(tmp_path, "kombi")
+    board, cutout = make_lotto.make_board_and_cutout_pdf(
+        str(session), output_dir=tmp_path / "out"
+    )
+    _assert_pdf(board)
+    _assert_pdf(cutout)
+    assert board.name == "kombi_board.pdf"
+    assert cutout.name == "kombi_cutout.pdf"
+
+
+def test_make_lotto_survives_broken_image(tmp_path, capsys):
+    session = _make_session(tmp_path, "delvis", n=2)
+    (session / "ødelagt.png").write_bytes(b"not a real png")
+    board = make_lotto.make_board_pdf(str(session), output_dir=tmp_path / "out")
+    _assert_pdf(board)
+    # A broken image warns rather than aborting the whole PDF.
+    assert "ødelagt.png" in capsys.readouterr().out
+
+
 # ── make_tegnprotokoll ───────────────────────────────────────────────────────
 
 

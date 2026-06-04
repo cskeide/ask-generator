@@ -38,6 +38,14 @@ _records: Optional[list[dict]] = None
 _records_lock = threading.Lock()
 
 
+class SearchError(Exception):
+    """Raised when records can't be loaded due to a network error with no cache.
+
+    Distinct from a successful search that simply returned no matches (an empty
+    list), so callers can tell "offline" apart from "nothing found".
+    """
+
+
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 
@@ -76,17 +84,18 @@ def _load_records() -> list[dict]:
                 raw = _fetch_xml()
                 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
                 _CACHE_FILE.write_bytes(raw)
-            except Exception:
+            except Exception as exc:
                 # Network unavailable – use stale cache if present
                 if _CACHE_FILE.exists():
                     raw = _CACHE_FILE.read_bytes()
                 else:
-                    _records = []
-                    return _records
+                    raise SearchError(
+                        "Could not reach tegnbanken.no and no local cache exists."
+                    ) from exc
 
         try:
             root = ET.fromstring(raw)
-        except ET.ParseError:
+        except ET.ParseError as parse_exc:
             # Cache is corrupt; delete it and attempt a fresh fetch
             if _CACHE_FILE.exists():
                 _CACHE_FILE.unlink(missing_ok=True)
@@ -95,9 +104,10 @@ def _load_records() -> list[dict]:
                 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
                 _CACHE_FILE.write_bytes(raw)
                 root = ET.fromstring(raw)
-            except Exception:
-                _records = []
-                return _records
+            except Exception as exc:
+                raise SearchError(
+                    "tegnbanken.no data was corrupt and could not be refreshed."
+                ) from (exc if not isinstance(exc, ET.ParseError) else parse_exc)
 
         _records = []
         for tegn in root.findall("tegn"):
@@ -128,12 +138,9 @@ def search(query: str, limit: int = 40) -> list[dict]:
         {"word": str, "foto": str, "la_hend": str}
 
     Empty strings for ``foto``/``la_hend`` mean that image type is unavailable.
-    Returns an empty list on network/parse failure.
+    Raises :exc:`SearchError` if records can't be loaded (offline, no cache).
     """
-    try:
-        records = _load_records()
-    except Exception:
-        return []
+    records = _load_records()
 
     q = query.lower()
     matches = [r for r in records if q in r["word"].lower()]
@@ -180,9 +187,12 @@ if __name__ == "__main__":
 
     query = " ".join(sys.argv[1:]) or "bade"
     print(f"Searching for: {query!r}")
-    results = search(query, limit=10)
+    try:
+        results = search(query, limit=10)
+    except SearchError as exc:
+        sys.exit(f"Search failed: {exc}")
     if not results:
-        print("No results (check network connection).")
+        print("No results.")
     for r in results:
         has_foto = "✓ foto" if r["foto"] else "  ----"
         has_lahend = "✓ la_hend" if r["la_hend"] else "  ----"

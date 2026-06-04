@@ -7,13 +7,19 @@ import io
 from PIL import Image
 from reportlab.pdfgen import canvas
 
+import pytest
+
 from pdf_utils import (
     IMAGE_EXTS,
+    compute_grid,
+    fit_label,
     fit_text,
     safe_stem,
     stem_to_label,
     to_rgb,
 )
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
 
 
 # ── safe_stem ────────────────────────────────────────────────────────────────
@@ -90,6 +96,59 @@ def test_fit_text_result_actually_fits_when_possible():
     size = fit_text(c, "Helvetica-Bold", text, width, 12)
     if size > 4:  # only guaranteed to fit when not floored
         assert c.stringWidth(text, "Helvetica-Bold", size) <= width
+
+
+# ── fit_label ────────────────────────────────────────────────────────────────
+
+
+def test_fit_label_returns_text_unchanged_when_it_fits():
+    c = _canvas()
+    text, size = fit_label(c, "Helvetica-Bold", "hi", 10_000, 12)
+    assert text == "hi"
+    assert size == 12
+
+
+def test_fit_label_truncates_with_ellipsis_when_impossible():
+    c = _canvas()
+    # Too narrow even at the 4 pt floor → must truncate rather than overflow.
+    text, size = fit_label(c, "Helvetica-Bold", "kommunikasjon", 8, 12)
+    assert text.endswith("…")
+    assert text != "kommunikasjon"
+    # The truncated string actually fits the available width.
+    assert c.stringWidth(text, "Helvetica-Bold", size) <= 8
+
+
+def test_fit_label_never_returns_empty():
+    c = _canvas()
+    text, _ = fit_label(c, "Helvetica-Bold", "word", 0.1, 12)
+    assert text  # at minimum a lone ellipsis
+
+
+# ── compute_grid ─────────────────────────────────────────────────────────────
+
+
+def test_compute_grid_matches_ask_card_layout():
+    # Mirrors make_cards constants: 3 cols, 10 mm margin, 5 mm gap.
+    page_w, page_h = A4
+    label_area_h = 12 + 2 * (2.5 * mm)
+    grid = compute_grid(page_w, page_h, 3, 10 * mm, 5 * mm, label_area_h)
+    assert grid.card_size > 0
+    assert grid.image_area_h > 0
+    assert grid.cards_per_page == grid.rows_per_page * 3
+    assert grid.cards_per_page >= 12  # 3 x 4 fits on A4
+
+
+def test_compute_grid_rejects_oversized_margin():
+    page_w, page_h = A4
+    with pytest.raises(ValueError):
+        compute_grid(page_w, page_h, 3, page_w, 5 * mm, 30)
+
+
+def test_compute_grid_rejects_label_taller_than_card():
+    page_w, page_h = A4
+    # A label area larger than the card leaves negative image height.
+    with pytest.raises(ValueError):
+        compute_grid(page_w, page_h, 3, 10 * mm, 5 * mm, 10_000)
 
 
 # ── to_rgb ───────────────────────────────────────────────────────────────────

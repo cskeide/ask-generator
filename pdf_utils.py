@@ -10,7 +10,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple
 
 from PIL import Image
 from reportlab.pdfbase import pdfmetrics
@@ -121,6 +121,74 @@ def fit_text(
             return size
         size -= 0.5
     return size
+
+
+def fit_label(
+    c: canvas.Canvas,
+    font: str,
+    text: str,
+    max_width: float,
+    start_pt: float,
+) -> tuple[str, float]:
+    """Fit *text* into *max_width*, returning ``(display_text, font_size)``.
+
+    Shrinks the font down to the :func:`fit_text` floor (~4 pt).  If the text
+    still overflows at that floor — i.e. it cannot be made to fit by shrinking
+    alone — it is truncated with a trailing ellipsis so labels never bleed past
+    the card edge.  The returned text is what should actually be drawn.
+    """
+    size = fit_text(c, font, text, max_width, start_pt)
+    if c.stringWidth(text, font, size) <= max_width:
+        return text, size
+    ellipsis = "…"
+    truncated = text
+    while truncated and c.stringWidth(truncated + ellipsis, font, size) > max_width:
+        truncated = truncated[:-1]
+    return (truncated + ellipsis if truncated else ellipsis), size
+
+
+# ── Page grid geometry ───────────────────────────────────────────────────────────
+
+
+class Grid(NamedTuple):
+    """Result of :func:`compute_grid` — a square-card page layout."""
+
+    card_size: float
+    image_area_h: float
+    rows_per_page: int
+    cards_per_page: int
+
+
+def compute_grid(
+    page_w: float,
+    page_h: float,
+    cols: int,
+    page_margin: float,
+    card_gap: float,
+    label_area_h: float,
+) -> Grid:
+    """Compute square-card grid geometry for a page.
+
+    Shared by the ASK-card and lotto generators, which lay out identical
+    square-card grids (the only difference is column count and spacing).
+
+    Raises :exc:`ValueError` if the constants leave no room for cards.
+    """
+    card_size = (page_w - 2 * page_margin - (cols - 1) * card_gap) / cols
+    image_area_h = card_size - label_area_h
+    if card_size <= 0 or image_area_h <= 0:
+        raise ValueError(
+            "Layout constants produce non-positive card dimensions — "
+            "reduce the page margin, card gap, or column count."
+        )
+    rows_per_page = int((page_h - 2 * page_margin + card_gap) // (card_size + card_gap))
+    cards_per_page = cols * rows_per_page
+    if cards_per_page <= 0:
+        raise ValueError(
+            "Layout constants produce 0 cards per page — "
+            "reduce the page margin, card gap, or column count."
+        )
+    return Grid(card_size, image_area_h, rows_per_page, cards_per_page)
 
 
 # ── Filename sanitisation ──────────────────────────────────────────────────────

@@ -20,16 +20,33 @@ _CDN_BASE = "https://static.arasaac.org/pictograms"
 _TIMEOUT = 10  # seconds
 
 
+class SearchError(Exception):
+    """Raised when a search fails due to a network/server error.
+
+    Distinct from a successful search that simply returned no matches (which is
+    represented by an empty list), so callers can tell "offline" apart from
+    "nothing found".
+    """
+
+
 def _search_lang(query: str, language: str, limit: int) -> list[dict]:
-    """Search ARASAAC in *language*, return list of {id, label} dicts."""
+    """Search ARASAAC in *language*, return list of {id, label} dicts.
+
+    Raises :exc:`SearchError` if the request itself fails (network/server).
+    """
     encoded = urllib.parse.quote(query, safe="")
     url = f"{_API_BASE}/pictograms/{language}/search/{encoded}"
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return []
+    except urllib.error.HTTPError as exc:
+        # 404 = valid query with no matches; anything else is a real failure.
+        if exc.code == 404:
+            return []
+        raise SearchError(f"ARASAAC request failed: {exc}") from exc
+    except Exception as exc:
+        raise SearchError(f"ARASAAC request failed: {exc}") from exc
 
     if not isinstance(data, list):
         return []
@@ -69,10 +86,25 @@ def search(query: str, limit: int = 20) -> list[dict]:
 
         {"id": int, "label": str, "thumb_bytes": None}
 
-    Returns an empty list on complete failure.
+    Returns an empty list when both languages succeed but find nothing.
+    Raises :exc:`SearchError` only if *both* language queries fail to reach the
+    server (so a partial outage still returns whatever was found).
     """
-    nb_results = _search_lang(query, "nb", limit)
-    en_results = _search_lang(query, "en", limit)
+    nb_results: list[dict] | None = None
+    en_results: list[dict] | None = None
+    try:
+        nb_results = _search_lang(query, "nb", limit)
+    except SearchError:
+        pass
+    try:
+        en_results = _search_lang(query, "en", limit)
+    except SearchError:
+        pass
+    if nb_results is None and en_results is None:
+        raise SearchError("Could not reach ARASAAC (network error).")
+
+    nb_results = nb_results or []
+    en_results = en_results or []
 
     seen_ids: set[int] = {r["id"] for r in nb_results}
     merged:   list[dict] = list(nb_results)
@@ -106,7 +138,10 @@ if __name__ == "__main__":
 
     query = sys.argv[1] if len(sys.argv) > 1 else "eple"
     print(f"Searching for '{query}'…")
-    results = search(query)
+    try:
+        results = search(query)
+    except SearchError as exc:
+        sys.exit(f"Search failed: {exc}")
     if not results:
         print("No results.")
     else:

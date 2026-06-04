@@ -39,7 +39,7 @@ from pdf_utils import (
     to_rgb,
     register_nordic_bold_font,
     register_nordic_regular_font,
-    fit_text,
+    fit_label,
     stem_to_label,
 )
 
@@ -64,7 +64,7 @@ HEADER_ROW_H = 8 * mm  # height of the column-header row
 FOOTER_H = 8 * mm  # height of the attribution footer at page bottom
 
 # Column widths as fractions of the usable page width
-_COL_FRACS = (0.27, 0.33, 0.40)  # word | image | description
+COL_FRACS = (0.27, 0.33, 0.40)  # word | image | description
 
 
 # ── Font registration ──────────────────────────────────────────────────────────
@@ -79,13 +79,6 @@ def _register_regular_font() -> str:
 
 
 # ── Text helpers ───────────────────────────────────────────────────────────────
-
-
-def _fit_font(
-    c: canvas.Canvas, font: str, text: str, max_width: float, start_pt: float
-) -> float:
-    """Largest font size ≤ *start_pt* at which *text* fits *max_width*."""
-    return fit_text(c, font, text, max_width, start_pt)
 
 
 def _wrap(
@@ -144,14 +137,14 @@ def _draw_row(
 
     # ── Word cell (Col 1) ──────────────────────────────────────────────────────
     inner_w = w_word - 2 * CELL_PAD_H
-    fs = _fit_font(c, bold_font, word, inner_w, WORD_FONT_PT)
+    display, fs = fit_label(c, bold_font, word, inner_w, WORD_FONT_PT)
     c.setFont(bold_font, fs)
     c.setFillColorRGB(0, 0, 0)
-    tw = c.stringWidth(word, bold_font, fs)
+    tw = c.stringWidth(display, bold_font, fs)
     c.drawString(
         x0 + (w_word - tw) / 2,
         row_bottom + (row_h - fs) / 2,
-        word,
+        display,
     )
 
     # ── Image cell (Col 2) ────────────────────────────────────────────────────
@@ -257,7 +250,7 @@ def make_tegnprotokoll(
     page_w, page_h = A4
 
     usable_w = page_w - 2 * PAGE_MARGIN
-    col_widths = tuple(f * usable_w for f in _COL_FRACS)
+    col_widths = tuple(f * usable_w for f in COL_FRACS)
     w_word, w_img, w_desc = col_widths
     table_x = PAGE_MARGIN
 
