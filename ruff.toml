@@ -1,0 +1,12 @@
+# Lint-only configuration — Ruff is not used as a formatter here.
+# Run with:  ruff check .
+line-length = 100
+
+[lint]
+# Focus on real problems (pyflakes: unused imports, undefined names, etc.) plus
+# basic pycodestyle hygiene.  Import sorting (I) and import-placement (E402) are
+# intentionally omitted: the project has no formatter and uses a deliberate
+# import layout, so we don't want to churn it.
+select = ["E", "F", "W"]
+# E501 (line too long) is noisy given the layout-constant tables and long URLs.
+ignore = ["E501", "E402"]

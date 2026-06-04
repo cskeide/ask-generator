@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import List, Optional, Set
 
 import make_cards
+import make_lotto
+import make_tegnprotokoll
 from PIL import Image, ImageDraw, ImageFont
 from pdf_utils import IMAGE_EXTS, to_rgb, safe_stem, stem_to_label, open_file
 
@@ -70,14 +72,17 @@ TEGNPROTOKOLL_SESSIONS_DIR = BASE_DIR / "tegnprotokoll-sessions"
 OUTPUT_DIR = BASE_DIR / "output"
 
 # ── Preview rendering ──────────────────────────────────────────────────────────
+# Column counts and column fractions are imported from the generator modules so
+# the preview can never silently drift from the actual PDF layout.  The pixel
+# sizes/gaps/margins below are preview-only (the PDFs work in mm, not px).
 _PREV_CARD = 150  # px per card in preview
-_PREV_COLS = 3
+_PREV_COLS = make_cards.COLS
 _PREV_GAP = 6
 _PREV_MARGIN = 12
 
-# Lotto preview constants (4-column, label-at-bottom)
+# Lotto preview constants (label-at-bottom)
 _LOTTO_PREV_CARD = 120
-_LOTTO_PREV_COLS = 4
+_LOTTO_PREV_COLS = make_lotto.LOTTO_COLS
 _LOTTO_PREV_GAP = 5
 _LOTTO_PREV_MARGIN = 12
 
@@ -89,7 +94,7 @@ _TEGN_PREV_ROW_H = 65  # px per data row
 _TEGN_PREV_HDR_H = 20  # column-header row
 _TEGN_PREV_TITLE_H = 28  # page-title area
 _TEGN_PREV_FOOTER_H = 16
-_TEGN_PREV_COL_FRACS = (0.27, 0.33, 0.40)  # word | image | description
+_TEGN_PREV_COL_FRACS = make_tegnprotokoll.COL_FRACS  # word | image | description
 
 
 def _preview_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -305,7 +310,7 @@ def render_tegnprotokoll_preview(
         draw.line([x2, row_y, x2, rb], fill=(190, 190, 190), width=1)
 
         # Word
-        label = img_path.stem.replace("_", " ")
+        label = stem_to_label(img_path.stem)
         try:
             bbox = font_word.getbbox(label)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -447,7 +452,7 @@ def render_lotto_preview(images: List[Path], page_index: int = 0) -> QPixmap:
             outline=(180, 180, 180),
             width=1,
         )
-        label = img_path.stem.replace("_", " ")
+        label = stem_to_label(img_path.stem)
         try:
             bbox = font.getbbox(label)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -590,10 +595,9 @@ class LottoBoardWorker(QThread):
 
     def run(self) -> None:
         try:
-            import make_lotto
-
-            board = make_lotto.make_board_pdf(str(self.session_path), OUTPUT_DIR)
-            cutout = make_lotto.make_cutout_pdf(str(self.session_path), OUTPUT_DIR)
+            board, cutout = make_lotto.make_board_and_cutout_pdf(
+                str(self.session_path), OUTPUT_DIR
+            )
             self.done.emit(str(board), str(cutout))
         except Exception as exc:
             self.error.emit(str(exc))
@@ -1035,7 +1039,7 @@ class LottoTab(QWidget):
         for img_path in images:
             item = QListWidgetItem(
                 QIcon(self._make_thumb(img_path)),
-                img_path.stem.replace("_", " "),
+                stem_to_label(img_path.stem),
             )
             item.setData(Qt.ItemDataRole.UserRole, img_path)
             item.setSizeHint(QSize(110, 120))
@@ -1065,7 +1069,7 @@ class LottoTab(QWidget):
         remove_action = menu.addAction("Remove from session")
         action = menu.exec(self.lotto_image_list.mapToGlobal(pos))
         if action == rename_action:
-            current_label = img_path.stem.replace("_", " ")
+            current_label = stem_to_label(img_path.stem)
             new_label, ok = QInputDialog.getText(
                 self, "Rename card", "Card label:", text=current_label
             )
@@ -1599,7 +1603,7 @@ class TegnprotokollTab(QWidget):
         for img_path in images:
             item = QListWidgetItem(
                 QIcon(self._make_thumb(img_path)),
-                img_path.stem.replace("_", " "),
+                stem_to_label(img_path.stem),
             )
             item.setData(Qt.ItemDataRole.UserRole, img_path)
             item.setSizeHint(QSize(110, 120))
@@ -1631,7 +1635,7 @@ class TegnprotokollTab(QWidget):
         action = menu.exec(self.tegn_signs_list.mapToGlobal(pos))
 
         if action == rename_action:
-            current_label = img_path.stem.replace("_", " ")
+            current_label = stem_to_label(img_path.stem)
             new_label, ok = QInputDialog.getText(
                 self, "Rename sign", "Sign label:", text=current_label
             )

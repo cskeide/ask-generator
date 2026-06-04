@@ -30,23 +30,26 @@ The project has two entry points:
 - **`make_cards.py`** — standalone CLI / importable library; resolves paths, discovers images, computes grid geometry, drives the ReportLab canvas.
 - **`app.spec`** — PyInstaller spec that bundles `app.py` into a single-file executable (`dist/ask-card-generator`). Build with `pyinstaller app.spec`.
 
+Shared helpers live in `pdf_utils.py` (used by all three generators and `app.py`): `register_nordic_bold_font()` / `register_nordic_regular_font()`, `fit_text()` (size only) and `fit_label()` (returns `(display_text, size)`, ellipsizing labels that won't fit even at the minimum size), `compute_grid()` (square-card page geometry → `Grid` namedtuple), `to_rgb()`, `safe_stem()`, `stem_to_label()`, `open_file()`.
+
 `make_cards.py` internal flow:
 
-1. `make_cards()` — entry point; resolves paths, discovers images, computes grid geometry, drives the ReportLab canvas
-2. `_draw_card()` — draws one card: border → label → image (via Pillow → BytesIO → ReportLab)
-3. `_register_label_font()` — finds a TTF font on disk (Liberation Sans Bold preferred); falls back to Helvetica-Bold
-4. `_fit_label()` — shrinks font size until the label text fits within the card width
+1. `make_cards()` — entry point; resolves paths, discovers images, computes grid geometry via `pdf_utils.compute_grid()`, drives the ReportLab canvas
+2. `_draw_card()` — draws one card: border → label → image (via Pillow → BytesIO → ReportLab). Label sizing/truncation is handled by `pdf_utils.fit_label()`
+3. `_register_label_font()` — registers a Nordic-capable TTF via `pdf_utils.register_nordic_bold_font()` (Liberation Sans Bold preferred); falls back to Helvetica-Bold
 
-All layout dimensions are computed from a few constants at the top of `make_cards.py` — edit those to change spacing without touching logic.
+(`make_lotto.py` mirrors this flow with `LOTTO_COLS`; it additionally decodes each image once and renders both the board and cut-out PDFs in `make_board_and_cutout_pdf()`.)
 
-`app.py` preview constants (separate from ReportLab layout):
+All layout dimensions are computed from a few constants at the top of each generator — edit those to change spacing without touching logic.
 
-| Constant | Default | Effect |
+`app.py` preview constants (separate from ReportLab layout). Pixel sizes are preview-only, but the column count and column fractions are **imported from the generator modules** so the preview can't drift from the real PDF:
+
+| Constant | Source | Effect |
 |---|---|---|
-| `_PREV_CARD` | `150 px` | Card size in preview |
-| `_PREV_COLS` | `3` | Columns in preview |
-| `_PREV_GAP` | `6 px` | Gap between cards in preview |
-| `_PREV_MARGIN` | `12 px` | Page margin in preview |
+| `_PREV_CARD` | `150 px` (preview-only) | Card size in preview |
+| `_PREV_COLS` | `make_cards.COLS` | Columns in preview |
+| `_PREV_GAP` | `6 px` (preview-only) | Gap between cards in preview |
+| `_PREV_MARGIN` | `12 px` (preview-only) | Page margin in preview |
 
 ## Key conventions
 

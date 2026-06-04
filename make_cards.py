@@ -11,7 +11,14 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 
-from pdf_utils import IMAGE_EXTS, to_rgb, register_nordic_bold_font, fit_text, stem_to_label
+from pdf_utils import (
+    IMAGE_EXTS,
+    to_rgb,
+    register_nordic_bold_font,
+    fit_label,
+    compute_grid,
+    stem_to_label,
+)
 
 
 # ── Layout constants ───────────────────────────────────────────────────────────
@@ -34,11 +41,6 @@ def _register_label_font() -> str:
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-def _fit_label(c: canvas.Canvas, font: str, text: str, max_width: float) -> float:
-    """Return the largest font size ≤ LABEL_FONT_PT at which text fits max_width."""
-    return fit_text(c, font, text, max_width, LABEL_FONT_PT)
-
-
 def _draw_card(
     c: canvas.Canvas,
     card_x: float,
@@ -57,12 +59,12 @@ def _draw_card(
     c.rect(card_x, card_y, card_size, card_size)
 
     # ── Label (visually at top = high y in ReportLab coords) ──────────────────
-    font_size = _fit_label(c, font, label, card_size - 4 * mm)
+    display, font_size = fit_label(c, font, label, card_size - 4 * mm, LABEL_FONT_PT)
     label_area_bottom = card_y + card_size - label_area_h
     baseline = label_area_bottom + LABEL_PAD_V
     c.setFont(font, font_size)
     c.setFillColorRGB(0, 0, 0)
-    c.drawCentredString(card_x + card_size / 2, baseline, label)
+    c.drawCentredString(card_x + card_size / 2, baseline, display)
 
     # ── Image (equal IMAGE_PAD on left, right, and bottom) ────────────────────
     try:
@@ -126,21 +128,10 @@ def make_cards(
     font = _register_label_font()
 
     page_w, page_h = A4
-    card_size = (page_w - 2 * PAGE_MARGIN - (COLS - 1) * CARD_GAP) / COLS
     label_area_h = LABEL_FONT_PT + 2 * LABEL_PAD_V
-    image_area_h = card_size - label_area_h
-    if card_size <= 0 or image_area_h <= 0:
-        raise ValueError(
-            "Layout constants produce non-positive card dimensions — "
-            "reduce PAGE_MARGIN, CARD_GAP, or COLS."
-        )
-    rows_per_page = int((page_h - 2 * PAGE_MARGIN + CARD_GAP) // (card_size + CARD_GAP))
-    cards_per_page = COLS * rows_per_page
-    if cards_per_page <= 0:
-        raise ValueError(
-            "Layout constants produce 0 cards per page — "
-            "reduce PAGE_MARGIN, CARD_GAP, or COLS."
-        )
+    card_size, image_area_h, rows_per_page, cards_per_page = compute_grid(
+        page_w, page_h, COLS, PAGE_MARGIN, CARD_GAP, label_area_h
+    )
 
     c = canvas.Canvas(str(output_path), pagesize=A4)
 
