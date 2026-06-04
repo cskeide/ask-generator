@@ -5,10 +5,34 @@ on:
     branches: [main]
     tags:
       - "v*"
+  pull_request:
   workflow_dispatch:
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Run tests (pytest)
+        run: python -m pytest
+
   build:
+    # Run tests first; only build/release if they pass.  PRs run tests only.
+    needs: test
+    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         include:
