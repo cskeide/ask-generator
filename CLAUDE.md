@@ -10,6 +10,7 @@ Python desktop tool that generates print-ready A4 PDFs for AAC/ASK (alternativ o
 
 ```bash
 pip install -r requirements.txt                             # PySide6>=6.6, Pillow>=10.0, reportlab>=4.0
+pip install -r requirements-dev.txt                        # pytest (tests only)
 pip install pyinstaller                                     # only for builds
 
 python app.py                                               # PySide6 GUI (all three tools)
@@ -19,10 +20,13 @@ python make_tegnprotokoll.py tegnprotokoll-sessions/<name>  # Sign protocol CLI
 python arasaac.py <query>                                   # ad-hoc API client test
 python tegnbanken.py <query>                                # ad-hoc API client test
 
+python -m pytest                                            # run the test suite (tests/, no network needed)
+python -m pytest tests/test_pdf_utils.py::test_safe_stem_empty_falls_back_to_image  # single test
+
 pyinstaller app.spec                                        # build dist/ask-card-generator (onefile, GUI)
 ```
 
-There is **no test suite, linter, formatter, or type checker** — no pytest/ruff/black/mypy config exists. Don't add placeholder test commands or assume any exist.
+Tests live in `tests/` (pytest, configured in `pytest.ini`); they cover the pure helpers in `pdf_utils` and run each generator against a temp session with generated images — no network or system fonts required. There is **no linter, formatter, or type checker** — no ruff/black/mypy config exists. Don't add placeholder lint commands or assume any exist.
 
 On Linux, PySide6 needs system Qt/XCB libs (see `.github/workflows/build.yml` for the apt-get list). CI builds onefile executables for Linux/Windows/macOS on push to `main` and tags (`v*`) create a GitHub release.
 

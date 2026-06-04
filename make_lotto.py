@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 
-from pdf_utils import IMAGE_EXTS, to_rgb, register_nordic_bold_font, fit_text
+from pdf_utils import IMAGE_EXTS, to_rgb, register_nordic_bold_font, fit_text, stem_to_label
 
 # Alias kept for any external callers
 _to_rgb = to_rgb
@@ -54,7 +54,7 @@ def _draw_lotto_card(
     *card_y* is the bottom-left corner in ReportLab coordinates (y increases
     upward).  *cutout_mode* replaces the solid border with a dashed cut-line.
     """
-    label = img_path.stem.replace("_", " ")
+    label = stem_to_label(img_path.stem)
 
     # ── Border ─────────────────────────────────────────────────────────────────
     c.setLineWidth(BORDER_WIDTH)

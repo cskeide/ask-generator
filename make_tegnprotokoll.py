@@ -40,6 +40,7 @@ from pdf_utils import (
     register_nordic_bold_font,
     register_nordic_regular_font,
     fit_text,
+    stem_to_label,
 )
 
 # Alias kept for any external callers
@@ -174,8 +175,8 @@ def _draw_row(
                 new_h,
                 mask="auto",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"  Warning: could not load {img_path.name}: {exc}")
 
     # ── Description cell (Col 3) ──────────────────────────────────────────────
     desc_w = w_desc - 2 * CELL_PAD_H
@@ -239,8 +240,8 @@ def make_tegnprotokoll(
     if desc_file.exists():
         try:
             descriptions = json.loads(desc_file.read_text("utf-8"))
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"  Warning: could not parse {desc_file.name}: {exc}")
 
     # Collect images
     images = sorted(p for p in session_path.iterdir() if p.suffix.lower() in IMAGE_EXTS)
@@ -315,7 +316,7 @@ def make_tegnprotokoll(
         if current_y - ROW_HEIGHT < min_y:
             current_y = start_page(is_first=False)
 
-        word = img_path.stem.replace("_", " ")
+        word = stem_to_label(img_path.stem)
         desc = descriptions.get(img_path.stem, "")
         _draw_row(
             c,
