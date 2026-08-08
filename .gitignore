@@ -22,3 +22,10 @@ dist/
 build/
 __pycache__/
 *.pyc
+
+# Virtualenvs
+.venv/
+venv/
+
+# Agent scratch worktrees (the rest of .claude/ is intentionally tracked)
+.claude/worktrees/
