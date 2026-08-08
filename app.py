@@ -26,13 +26,20 @@ def _to_rgb(img: Image.Image) -> Image.Image:
     return to_rgb(img)
 
 
-def _pillow_to_qpixmap(img: Image.Image) -> "QPixmap":
-    """Convert a Pillow RGB image to QPixmap without a PNG encode/decode round-trip."""
+def _pillow_to_qimage(img: Image.Image) -> "QImage":
+    """Convert a Pillow RGB image to QImage without a PNG encode/decode round-trip.
+
+    Returns a QImage rather than a QPixmap so the conversion is safe to run on a
+    worker thread — QPixmap may only be touched from the main (GUI) thread.
+    Callers convert with QPixmap.fromImage() in a main-thread slot.
+    """
     raw = img.tobytes("raw", "RGB")
     qimg = QImage(
         raw, img.width, img.height, img.width * 3, QImage.Format.Format_RGB888
     )
-    return QPixmap.fromImage(qimg)
+    # QImage does not take ownership of `raw`; copy so the pixel data survives
+    # after this function returns and `raw` is garbage-collected.
+    return qimg.copy()
 
 
 from PySide6.QtCore import Qt, QSize, QThread, Signal
@@ -123,10 +130,10 @@ def _preview_cards_per_page() -> int:
     return rows_per_page * cols
 
 
-def render_page_preview(images: List[Path], page_index: int = 0) -> QPixmap:
+def render_page_preview(images: List[Path], page_index: int = 0) -> QImage:
     """Render a scaled A4-proportioned preview of the given page using Pillow."""
     if not images:
-        return QPixmap()
+        return QImage()
 
     card, gap, margin, cols = _PREV_CARD, _PREV_GAP, _PREV_MARGIN, _PREV_COLS
     page_w = cols * card + (cols - 1) * gap + 2 * margin
@@ -190,7 +197,7 @@ def render_page_preview(images: List[Path], page_index: int = 0) -> QPixmap:
         except Exception:
             pass
 
-    return _pillow_to_qpixmap(page)
+    return _pillow_to_qimage(page)
 
 
 def _lotto_cards_per_page() -> int:
@@ -221,10 +228,10 @@ def render_tegnprotokoll_preview(
     items: List[Path],
     descriptions: dict,
     page_index: int = 0,
-) -> QPixmap:
+) -> QImage:
     """Render a scaled A4 preview of a Tegnprotokoll page (3-column table)."""
     if not items:
-        return QPixmap()
+        return QImage()
 
     w, h = _TEGN_PREV_W, _TEGN_PREV_H
     margin = _TEGN_PREV_MARGIN
@@ -389,13 +396,13 @@ def render_tegnprotokoll_preview(
         font=font_foot,
     )
 
-    return _pillow_to_qpixmap(page)
+    return _pillow_to_qimage(page)
 
 
-def render_lotto_preview(images: List[Path], page_index: int = 0) -> QPixmap:
+def render_lotto_preview(images: List[Path], page_index: int = 0) -> QImage:
     """Render a scaled A4-proportioned preview of a lotto page (label at bottom, 4 cols)."""
     if not images:
-        return QPixmap()
+        return QImage()
 
     card, gap, margin, cols = (
         _LOTTO_PREV_CARD,
@@ -468,7 +475,7 @@ def render_lotto_preview(images: List[Path], page_index: int = 0) -> QPixmap:
             font=font,
         )
 
-    return _pillow_to_qpixmap(page)
+    return _pillow_to_qimage(page)
 
 
 # ── Worker threads ─────────────────────────────────────────────────────────────
@@ -492,7 +499,9 @@ class GenerateWorker(QThread):
 
 
 class PreviewWorker(QThread):
-    ready = Signal(QPixmap)
+    # QImage, not QPixmap — run() executes off the main thread, and QPixmap may
+    # only be constructed there.  The receiving slot does QPixmap.fromImage().
+    ready = Signal(QImage)
 
     def __init__(
         self, images: List[Path], page_index: int = 0, parent: Optional[QWidget] = None
@@ -506,7 +515,7 @@ class PreviewWorker(QThread):
 
 
 class LottoPreviewWorker(QThread):
-    ready = Signal(QPixmap)
+    ready = Signal(QImage)  # see PreviewWorker.ready
 
     def __init__(
         self, images: List[Path], page_index: int = 0, parent: Optional[QWidget] = None
@@ -712,7 +721,7 @@ class TegnprotokollPdfWorker(QThread):
 class TegnprotokollPreviewWorker(QThread):
     """Render a Tegnprotokoll table preview page using Pillow."""
 
-    ready = Signal(QPixmap)
+    ready = Signal(QImage)  # see PreviewWorker.ready
 
     def __init__(
         self,
@@ -1159,10 +1168,11 @@ class LottoTab(QWidget):
             self._update_nav_buttons()
             self._update_preview()
 
-    def _on_preview_ready(self, pixmap: QPixmap) -> None:
-        if pixmap.isNull():
+    def _on_preview_ready(self, image: QImage) -> None:
+        if image.isNull():
             self.lotto_preview_label.setText("No cards in session")
             return
+        pixmap = QPixmap.fromImage(image)  # main thread — safe here
         max_w = max(100, self.lotto_preview_scroll.width() - 20)
         if pixmap.width() > max_w:
             pixmap = pixmap.scaledToWidth(
@@ -1738,10 +1748,11 @@ class TegnprotokollTab(QWidget):
             self._update_nav_buttons()
             self._update_preview()
 
-    def _on_preview_ready(self, pixmap: QPixmap) -> None:
-        if pixmap.isNull():
+    def _on_preview_ready(self, image: QImage) -> None:
+        if image.isNull():
             self.tegn_preview_label.setText("No signs in session")
             return
+        pixmap = QPixmap.fromImage(image)  # main thread — safe here
         max_w = max(100, self.tegn_preview_scroll.width() - 20)
         if pixmap.width() > max_w:
             pixmap = pixmap.scaledToWidth(
@@ -2307,10 +2318,11 @@ class MainWindow(QMainWindow):
             self._update_nav_buttons()
             self._update_preview()
 
-    def _on_preview_ready(self, pixmap: QPixmap) -> None:
-        if pixmap.isNull():
+    def _on_preview_ready(self, image: QImage) -> None:
+        if image.isNull():
             self.preview_label.setText("No cards in session")
             return
+        pixmap = QPixmap.fromImage(image)  # main thread — safe here
         max_w = max(100, self.preview_scroll.width() - 20)
         if pixmap.width() > max_w:
             pixmap = pixmap.scaledToWidth(
