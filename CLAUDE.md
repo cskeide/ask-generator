@@ -72,6 +72,7 @@ There is **no version string in the source** — no `__version__`, nothing in `a
 - **`pdf-layout-reviewer`** agent — review rendering/layout changes (origin direction, preview drift, constants, fonts).
 - **`qt-threading-reviewer`** agent — review `QThread` workers and anything touching Qt objects off the main thread.
 - **`layout-constants`** skill — Claude-only (`user-invocable: false`); auto-loads the constant tables and rendering gotchas when drawing code comes up.
+- **`run-app`** skill — launches the GUI (venv bootstrap, background launch, Qt/display failure modes), the offscreen smoke test and screenshot capture, and the CLI + `pdftoppm` route for inspecting generated PDFs.
 - **`release`** skill — user-only (`disable-model-invocation: true`); tags and publishes. Never invoke it on your own inference.
 
 ## Reference docs
